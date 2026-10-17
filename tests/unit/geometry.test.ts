@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { area, cleanPolygon, dominantAngle, orthogonalize, removeJogs, removeNotches, rotate } from '../../src/lib/geometry'
+import { area, cleanPolygon, dominantAngle, orthogonalize, removeJogs, removeNotches, rotate, splitPolygon } from '../../src/lib/geometry'
 
 describe('geometry', () => {
   it('computes polygon area regardless of winding', () => {
@@ -41,5 +41,46 @@ describe('geometry', () => {
     ]
     expect(removeJogs(stepped, 0.1)).toHaveLength(4)
     expect(removeJogs(stepped, 0.01)).toHaveLength(6)
+  })
+})
+
+describe('splitPolygon', () => {
+  const rect = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 6 }, { x: 0, y: 6 }]
+
+  it('splits a rectangle with a straight cut', () => {
+    const r = splitPolygon(rect, [{ x: 4, y: 0 }, { x: 4, y: 6 }])!
+    expect(r).not.toBeNull()
+    expect(r.map(area).sort((m, n) => m - n)).toEqual([24, 36])
+    for (const piece of r) expect(piece).toHaveLength(4)
+  })
+
+  it('splits with an L-shaped cut', () => {
+    const r = splitPolygon(rect, [{ x: 4, y: 0 }, { x: 4, y: 3 }, { x: 10, y: 3 }])!
+    expect(r.map(area).sort((m, n) => m - n)).toEqual([18, 42])
+    expect(r.map((p) => p.length).sort()).toEqual([4, 6])
+  })
+
+  it('handles cuts that start and end on the same wall', () => {
+    const r = splitPolygon(rect, [{ x: 2, y: 0 }, { x: 2, y: 2 }, { x: 5, y: 2 }, { x: 5, y: 0 }])!
+    expect(r.map(area).sort((m, n) => m - n)).toEqual([6, 54])
+  })
+
+  it('handles cuts through existing corners', () => {
+    const r = splitPolygon(rect, [{ x: 0, y: 0 }, { x: 10, y: 6 }])!
+    expect(r.map(area)).toEqual([30, 30])
+    for (const piece of r) expect(piece).toHaveLength(3)
+  })
+
+  it('works on rotated, irregular rooms', () => {
+    const th = 0.35
+    const L = [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 3 }, { x: 3, y: 3 }, { x: 3, y: 7 }, { x: 0, y: 7 }].map((p) => rotate(p, th))
+    const r = splitPolygon(L, [rotate({ x: 0, y: 3 }, th), rotate({ x: 3, y: 3 }, th)])!
+    expect(r.map(area).map((v) => +v.toFixed(9)).sort((m, n) => m - n)).toEqual([12, 24])
+  })
+
+  it('rejects invalid cuts', () => {
+    expect(splitPolygon(rect, [{ x: 4, y: 1 }, { x: 4, y: 6 }])).toBeNull() // starts inside
+    expect(splitPolygon(rect, [{ x: 4, y: 0 }, { x: 12, y: 3 }, { x: 4, y: 6 }])).toBeNull() // leaves the room
+    expect(splitPolygon(rect, [{ x: 0, y: 0 }, { x: 10, y: 0 }])).toBeNull() // along a wall
   })
 })

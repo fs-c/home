@@ -382,6 +382,65 @@ export function dominantAngle(pts: Vec[]): number {
   return Math.atan2(cy, cx) / 4
 }
 
+/**
+ * Position of a boundary point as `edgeIndex + t` (t in [0, 1)), or null if
+ * the point isn't on the polygon's boundary.
+ */
+export function boundaryParam(pts: Vec[], p: Vec, eps = 1e-6): number | null {
+  let best: number | null = null
+  let bestD = eps
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i]
+    const b = pts[(i + 1) % pts.length]
+    const d = dist(p, projectOnSegment(p, a, b))
+    if (d <= bestD) {
+      bestD = d
+      const l = dist(a, b)
+      const t = l ? Math.min(dist(a, p) / l, 1) : 0
+      best = t >= 1 ? (i + 1) % pts.length : i + t
+    }
+  }
+  return best
+}
+
+/**
+ * Split a polygon along a cut polyline that starts and ends on its boundary
+ * and runs through its interior. Returns the two pieces, or null if the cut
+ * is invalid (endpoints off the boundary, leaves the polygon, degenerate).
+ */
+export function splitPolygon(pts: Vec[], cut: Vec[], eps = 1e-6): [Vec[], Vec[]] | null {
+  if (cut.length < 2) return null
+  const n = pts.length
+  const c0 = cut[0]
+  const cn = cut[cut.length - 1]
+  const s0 = boundaryParam(pts, c0, eps)
+  const s1 = boundaryParam(pts, cn, eps)
+  if (s0 === null || s1 === null || dist(c0, cn) <= eps) return null
+  const inner = cut.slice(1, -1)
+  if (inner.some((p) => !pointInPolygon(p, pts))) return null
+  for (let i = 0; i + 1 < cut.length; i++) {
+    if (!pointInPolygon(mid(cut[i], cut[i + 1]), pts)) return null
+  }
+
+  /** Polygon vertices strictly between boundary positions `from` and `to`, walking forward. */
+  const walk = (from: number, to: number) => {
+    const span = (to - from + n) % n
+    return pts
+      .map((p, j) => ({ p, o: (j - from + n) % n }))
+      .filter(({ o }) => o > eps && o < span - eps)
+      .sort((a, b) => a.o - b.o)
+      .map(({ p }) => p)
+  }
+  const a = cleanPolygon([c0, ...walk(s0, s1), cn, ...[...inner].reverse()], eps)
+  const b = cleanPolygon([cn, ...walk(s1, s0), c0, ...inner], eps)
+  if (a.length < 3 || b.length < 3) return null
+  // A cut that crosses the boundary yields overlapping pieces: areas won't add up.
+  const total = area(pts)
+  if (Math.abs(area(a) + area(b) - total) > total * 1e-6 + eps) return null
+  if (area(a) < eps || area(b) < eps) return null
+  return [a, b]
+}
+
 export function fmtLen(m: number): string {
   return `${m.toFixed(2)} m`
 }

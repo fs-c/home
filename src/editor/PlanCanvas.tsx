@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import {
-  add, area, bounds, cleanPolygon, dist, dot, fmtArea, fmtLen, labelPoint, len, mid, mul, sub,
+  add, area, boundaryParam, bounds, cleanPolygon, dist, dot, fmtArea, fmtLen, labelPoint, len, mid, mul,
+  pointInPolygon, projectOnSegment, splitPolygon, sub,
 } from '../lib/geometry'
 import { isTyping } from '../lib/dom'
 import { nextRoomColor, nextRoomName } from '../model/doc'
@@ -11,7 +12,7 @@ import { detectRoom, prepareImage, wallMaskOverlay, type PreparedImage, type Wan
 import { mainFrame, snapPoint, targetsFrom, type Guide, type SnapResult, type SnapSettings } from './snapping'
 import { backdropCorners, backdropTransform, imageToWorld, worldToImage } from '../model/backdrop'
 
-export type Tool = 'select' | 'polygon' | 'rect' | 'wand' | 'calibrate'
+export type Tool = 'select' | 'polygon' | 'rect' | 'split' | 'wand' | 'calibrate'
 export type Mode = 'plan' | 'home'
 
 interface View {
@@ -73,6 +74,8 @@ export function PlanCanvas(props: Props) {
   /** Rectangle tool: first wall (1–2 points), then depth. */
   const [rectPts, setRectPts] = useState<Vec[]>([])
   const [calibStart, setCalibStart] = useState<Vec | null>(null)
+  /** Split tool: the cut being drawn (starts and ends on a wall of one room). */
+  const [cut, setCut] = useState<Vec[]>([])
   const [lengthInput, setLengthInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [maskUrl, setMaskUrl] = useState<string | null>(null)
@@ -88,6 +91,7 @@ export function PlanCanvas(props: Props) {
     setDraft([])
     setRectPts([])
     setCalibStart(null)
+    setCut([])
     setLengthInput('')
   }, [tool, floor.id, mode])
 
@@ -213,7 +217,71 @@ export function PlanCanvas(props: Props) {
       return snapPoint(raw, allTargets(), view.k, s, rectPts[0])
     }
     if (tool === 'calibrate') return snapPoint(raw, allTargets(), view.k, s, calibStart ?? undefined)
+    if (tool === 'split') return snapPoint(raw, allTargets(cut, openEdges(cut)), view.k, s, cut[cut.length - 1])
     return { p: raw, kind: 'none', guides: [] }
+  }
+
+  /** The room a cut goes through: starts on its wall, first segment runs inside it. */
+  const cutRoom = (pts: Vec[]): Room | undefined =>
+    pts.length < 2
+      ? undefined
+      : floor.rooms.find((r) => boundaryParam(r.points, pts[0]) !== null && pointInPolygon(mid(pts[0], pts[1]), r.points))
+
+  /** Pull a point onto a room's wall if it's within snapping distance of it. */
+  const ontoWall = (p: Vec, rooms: Room[]): Vec => {
+    let best = p
+    let bestD = 10 / view.k
+    for (const r of rooms) {
+      for (let i = 0; i < r.points.length; i++) {
+        const q = projectOnSegment(p, r.points[i], r.points[(i + 1) % r.points.length])
+        if (dist(p, q) < bestD) {
+          bestD = dist(p, q)
+          best = q
+        }
+      }
+    }
+    return best
+  }
+
+  const placeCutPoint = (snapped: SnapResult) => {
+    let p = snapped.p
+    if (!cut.length) {
+      p = ontoWall(p, floor.rooms)
+      if (!floor.rooms.some((r) => boundaryParam(r.points, p) !== null)) {
+        props.onMessage('Start the cut on a wall of a room (it snaps when you get close).')
+        return
+      }
+      setCut([p])
+      return
+    }
+    let next = [...cut, p]
+    const room = cutRoom(next)
+    if (!room) {
+      props.onMessage('The cut has to run through the inside of a room.')
+      return
+    }
+    p = ontoWall(p, [room])
+    next = [...cut, p]
+    if (boundaryParam(room.points, p) === null) {
+      if (pointInPolygon(p, room.points)) setCut(next)
+      else props.onMessage('Keep the cut inside the room, and finish it on a wall.')
+      return
+    }
+    const pieces = splitPolygon(room.points, next)
+    if (!pieces) {
+      props.onMessage("Can't split along that line – it must stay inside the room.")
+      return
+    }
+    // The bigger piece keeps the room's identity (name, notes, colour).
+    const [big, small] = area(pieces[0]) >= area(pieces[1]) ? pieces : [pieces[1], pieces[0]]
+    const newRoom: Room = { id: uid(), name: nextRoomName(floor), color: nextRoomColor(floor), points: small, items: [] }
+    props.commit((f) => ({
+      ...f,
+      rooms: f.rooms.flatMap((r) => (r.id === room.id ? [{ ...r, points: big }, newRoom] : [r])),
+    }))
+    props.onSelect(newRoom.id)
+    setCut([])
+    props.onMessage(`Split "${room.name}" into ${fmtArea(area(big))} and ${fmtArea(area(small))} (${newRoom.name}).`)
   }
 
   /** The rectangle being drawn, once its first wall exists. */
@@ -354,6 +422,8 @@ export function PlanCanvas(props: Props) {
       } else {
         setCalibStart(snapped.p)
       }
+    } else if (tool === 'split') {
+      placeCutPoint(snapped)
     } else if (tool === 'wand' && !busy) {
       void runWand(world)
     }
@@ -478,6 +548,15 @@ export function PlanCanvas(props: Props) {
       } else if (e.key === 'Escape') {
         if (lengthInput) setLengthInput('')
         else setDraft([])
+      }
+      return
+    }
+    if (tool === 'split' && cut.length > 0) {
+      if (e.key === 'Backspace') {
+        setCut((c) => c.slice(0, -1))
+        e.preventDefault()
+      } else if (e.key === 'Escape') {
+        setCut([])
       }
       return
     }
@@ -644,6 +723,29 @@ export function PlanCanvas(props: Props) {
         />
         <MeasureLabel a={pts[0]} b={pts[1]} k={k} />
         {pts.length === 4 && <MeasureLabel a={pts[1]} b={pts[2]} k={k} />}
+      </g>
+    )
+  }
+
+  if (drawing && tool === 'split' && cut.length) {
+    const pts = cp ? [...cut, cp] : cut
+    const target = cutRoom(pts)
+    draftEls = (
+      <g className="pointer-events-none">
+        {target && (
+          <polygon
+            points={target.points.map((p) => `${p.x},${p.y}`).join(' ')}
+            fill="none" stroke="#0891b2" strokeWidth={3} strokeDasharray="6 4" vectorEffect="non-scaling-stroke"
+          />
+        )}
+        <polyline
+          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+          fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" vectorEffect="non-scaling-stroke"
+        />
+        {cut.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={px(4)} className="fill-white stroke-red-600" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        ))}
+        {cp && <MeasureLabel a={cut[cut.length - 1]} b={cp} k={k} />}
       </g>
     )
   }

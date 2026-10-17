@@ -91,6 +91,9 @@ export function PlanSidebar({
         {floor.rooms.length === 0 ? (
           <p className="text-sm text-stone-500">
             Trace rooms with the <b>magic wand</b> <Kbd>W</Kbd> (click inside a room on the plan), or draw them as <b>rectangles</b> <Kbd>R</Kbd> or <b>polygons</b> <Kbd>P</Kbd>. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones – so on a rotated plan, getting the first wall right makes the rest easy.
+            <span className="mt-2 block">
+              Or trace the whole outline first, then cut it into rooms with <b>split</b> <Kbd>X</Kbd>.
+            </span>
           </p>
         ) : (
           <ul className="-mx-2">

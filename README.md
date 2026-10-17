@@ -17,7 +17,10 @@ pnpm dev
    by measuring a known dimension, then trace rooms:
    - **Magic wand** (W): click inside a room; walls are detected from the image.
    - **Rectangle** (R) / **Polygon** (P): manual drawing with snapping to existing
-     corners/walls, alignment guides, 45° angle lock and typed lengths.
+     corners/walls, angles snapping parallel/perpendicular to existing walls,
+     alignment guides and typed lengths.
+   - **Split** (X): trace the whole outline first, then cut it into rooms –
+     click a wall, optionally click inside for bends, click the opposite wall.
    - **Select** (V): drag corners, walls or whole rooms; add/remove corners.
 2. **Home** mode: clean view of your rooms; attach TODOs, notes and links per room.
 
@@ -25,6 +28,9 @@ Everything is stored in the browser (localStorage + IndexedDB for images).
 Use Export/Import to back up or move data as a single JSON file.
 
 ## Testing
+
+Note that the tests are purely agent-curated and might not reflect the "true" intent 
+or requirements. Nothing about them is set in stone.
 
 ```sh
 pnpm typecheck     # app + tests
