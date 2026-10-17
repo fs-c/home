@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
 import { PlanCanvas, type Tool } from '../editor/PlanCanvas'
 import type { SnapSettings } from '../editor/snapping'
 import { isTyping } from '../lib/dom'
@@ -120,9 +120,13 @@ export function PlanEditor({
     onSelect(null)
   }
 
+  const showStart = !bd && floor.rooms.length === 0 && !drawWithoutPlan
+  const blocked = useRef(showStart)
+  blocked.current = showStart
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
+      if (blocked.current || isTyping(e.target) || e.ctrlKey || e.metaKey || e.altKey) return
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase())
       if (t) setTool(t.id)
     }
@@ -130,10 +134,27 @@ export function PlanEditor({
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
-  const showStart = !bd && floor.rooms.length === 0 && !drawWithoutPlan
+  const dropTarget = {
+    onDragOver: (e: DragEvent) => e.preventDefault(),
+    onDrop: (e: DragEvent) => {
+      e.preventDefault()
+      const f = e.dataTransfer.files[0]
+      if (f) void upload(f)
+    },
+  }
 
   return (
     <div className="flex h-dvh flex-col bg-stone-100">
+      <input
+        ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          if (f) void upload(f)
+          e.target.value = ''
+        }}
+      />
+      {/* everything behind the start dialog is inert while it's open */}
+      <div className="contents" inert={showStart}>
       <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 bg-white px-3 py-2 pt-[max(env(safe-area-inset-top),0.5rem)]">
         <FloorTabs
           floors={doc.floors}
@@ -150,23 +171,7 @@ export function PlanEditor({
         </div>
       </header>
 
-      <main
-        className="relative min-h-0 flex-1"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault()
-          const f = e.dataTransfer.files[0]
-          if (f) void upload(f)
-        }}
-      >
-        <input
-          ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0]
-            if (f) void upload(f)
-            e.target.value = ''
-          }}
-        />
+      <main className="relative min-h-0 flex-1" {...dropTarget}>
         <PlanCanvas
           floor={floor}
           imageUrl={imageUrl}
@@ -179,6 +184,7 @@ export function PlanEditor({
           fitRequest={fitRequest}
           pendingCalibration={calibration}
           onCalibrate={(a, b) => setCalibration([a, b])}
+          onCalibrationChange={setCalibration}
           onMessage={onMessage}
           commit={commitFloor}
           replace={replaceFloor}
@@ -193,23 +199,6 @@ export function PlanEditor({
             !showStart && <ToolHint tool={tool} />
           )}
         </div>
-
-        {showStart && (
-          <div className="absolute inset-0 flex items-center justify-center bg-stone-100/80 p-4">
-            <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 text-center shadow-lg">
-              <h2 className="text-lg font-semibold">Trace your floor plan</h2>
-              <p className="mt-1 text-sm text-stone-500">
-                Upload a plan (photo, image or PDF) to trace your rooms on. You only need to do this once.
-              </p>
-              <Button variant="primary" className="mt-4 w-full !py-2.5" onClick={() => fileRef.current?.click()}>
-                Upload floor plan
-              </Button>
-              <Button variant="ghost" className="mt-2 w-full" onClick={() => setDrawWithoutPlan(true)}>
-                Draw rooms without a plan
-              </Button>
-            </div>
-          </div>
-        )}
 
         {calibration && (
           <CalibrateDialog line={calibration} onApply={applyCalibration} onCancel={() => setCalibration(null)} />
@@ -249,6 +238,30 @@ export function PlanEditor({
         undo={history.undo}
         redo={history.redo}
       />
+      </div>
+
+      {showStart && (
+        <div
+          role="dialog" aria-modal="true" aria-labelledby="start-title" {...dropTarget}
+          className="fixed inset-0 z-40 flex items-end justify-center bg-stone-900/50 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] backdrop-blur-[2px] sm:items-center"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center shadow-2xl">
+            <h2 id="start-title" className="text-lg font-semibold">Trace your floor plan</h2>
+            <p className="mt-1 text-sm text-stone-500">
+              Upload a plan (photo, image or PDF) to trace your rooms on. You only need to do this once.
+            </p>
+            <Button variant="primary" className="mt-4 w-full !py-2.5" onClick={() => fileRef.current?.click()}>
+              Upload floor plan
+            </Button>
+            <Button variant="ghost" className="mt-2 w-full" onClick={() => setDrawWithoutPlan(true)}>
+              Draw rooms without a plan
+            </Button>
+            <Button variant="ghost" className="mt-1 w-full !text-stone-400" onClick={onDone}>
+              Not now
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
