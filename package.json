@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "wand-harness": "node scripts/wand-harness.mjs"
+    "wand-harness": "node scripts/wand-harness.mjs",
+    "deploy": "pnpm build && wrangler deploy"
   },
   "dependencies": {
     "pdfjs-dist": "^6.4.299",
@@ -27,6 +28,8 @@
     "tailwindcss": "^4.3.3",
     "typescript": "~7.0.2",
     "vite": "^8.3.4",
-    "vitest": "^5.0.5"
-  }
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.0"
+  },
+  "packageManager": "pnpm@12.14.0"
 }
