@@ -44,10 +44,11 @@ export function CalibrateDialog({
         <h3 className="font-semibold">How long is this line in reality?</h3>
         <p className="mt-1 text-xs text-stone-500">
           Use a dimension printed on the plan. The more of the plan the line spans, the more accurate the scale.
-          Currently measures {current.toFixed(2)} m.
+          Drag the ends of the line to adjust them. Currently measures {current.toFixed(2)} m.
         </p>
         <input
-          autoFocus
+          // on touch devices the keyboard would cover the line while its ends still need adjusting
+          autoFocus={matchMedia('(pointer: fine)').matches}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Escape' && onCancel()}

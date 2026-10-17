@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import {
   add, area, boundaryParam, bounds, cleanPolygon, dist, dot, fmtArea, fmtLen, labelPoint, len, mid, mul,
-  pointInPolygon, projectOnSegment, splitPolygon, sub,
+  pointInPolygon, projectOnSegment, rotate, splitPolygon, sub,
 } from '../lib/geometry'
 import { isTyping } from '../lib/dom'
 import { nextRoomColor, nextRoomName } from '../model/doc'
@@ -19,13 +19,29 @@ interface View {
   ty: number
   /** Screen pixels per meter. */
   k: number
+  /** Rotation of the view (radians, clockwise on screen). */
+  r: number
 }
+
+/** World → canvas pixels. */
+const toScreenOf = (v: View, p: Vec): Vec => add(mul(rotate(p, v.r), v.k), { x: v.tx, y: v.ty })
+
+/** Wrap an angle into (-π, π]. */
+const wrapAngle = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
+
+/** A two-finger twist has to exceed this before the view starts rotating, so zooming doesn't rotate by accident. */
+const ROTATE_THRESHOLD = (12 * Math.PI) / 180
+/** While rotating, the view sticks to multiples of 90° within this angle. */
+const ROTATE_SNAP = (4 * Math.PI) / 180
 
 type Drag =
   /** `tap`: what to select if the pointer is released without panning (null = nothing). */
   | { type: 'pan'; sx: number; sy: number; view: View; tap?: string | null; moved?: boolean }
-  /** Two-finger zoom/pan; `m0` is the start midpoint relative to the canvas. */
-  | { type: 'pinch'; d0: number; m0: Vec; view: View }
+  /**
+   * Two-finger zoom/pan/rotate. `w0` is the world point under the fingers' start midpoint,
+   * `a0` the angle between the fingers that rotation is measured from.
+   */
+  | { type: 'pinch'; d0: number; a0: number; w0: Vec; view: View; rotating: boolean }
   /** Touch drawing: the point follows the finger and is placed on release. */
   | { type: 'aim' }
   /** After a pinch, until all fingers are lifted. */
@@ -34,6 +50,8 @@ type Drag =
   | { type: 'edge'; roomId: string; idx: number; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
   | { type: 'room'; roomId: string; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
   | { type: 'rect'; sx: number; sy: number }  // dragging the first wall of a rectangle
+  /** An end of the scale line; it moves with the pointer rather than jumping under it. */
+  | { type: 'calib'; idx: number; start: Vec; orig: Vec; started: boolean; sx: number; sy: number }
 
 interface Props {
   floor: Floor
@@ -48,6 +66,8 @@ interface Props {
   fitRequest: { n: number; focus?: Vec[] }
   pendingCalibration: [Vec, Vec] | null
   onCalibrate: (a: Vec, b: Vec) => void
+  /** An end of the pending scale line was dragged. */
+  onCalibrationChange?: (line: [Vec, Vec]) => void
   onMessage: (msg: string) => void
   commit: (fn: (f: Floor) => Floor) => void
   replace: (fn: (f: Floor) => Floor) => void
@@ -62,7 +82,7 @@ export function PlanCanvas(props: Props) {
   const bd = floor.backdrop
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
-  const [view, setView] = useState<View>({ tx: 40, ty: 40, k: 50 })
+  const [view, setView] = useState<View>({ tx: 40, ty: 40, k: 50, r: 0 })
   const [cursor, setCursor] = useState<SnapResult | null>(null)
   const [draft, setDraft] = useState<Vec[]>([])
   /** Rectangle tool: first wall (1–2 points), then depth. */
@@ -80,6 +100,8 @@ export function PlanCanvas(props: Props) {
   const spaceDown = useRef(false)
 
   const editing = mode === 'plan'
+  /** The ends of the scale line placed so far. */
+  const calibPts: Vec[] = props.pendingCalibration ?? (calibStart ? [calibStart] : [])
   const selected = floor.rooms.find((r) => r.id === selectedId) ?? null
 
   // Reset transient drawing state when the tool or floor changes.
@@ -114,16 +136,21 @@ export function PlanCanvas(props: Props) {
     } else if (bd && editing && props.showBackdrop) {
       pts.push(...backdropCorners(bd))
     }
-    if (!pts.length) return { tx: size.w / 2 - 250, ty: size.h / 2 - 200, k: 50 }
-    const b = bounds(pts)
+    const r = view.r
+    if (!pts.length) return { ...toScreenFit({ minX: 0, minY: 0, maxX: 10, maxY: 8 }, 50), r }
+    // fit the plan as it appears on screen, i.e. rotated with the view
+    const b = bounds(pts.map((p) => rotate(p, r)))
     const pad = editing ? 48 : 12
     const k = Math.min((size.w - pad * 2) / Math.max(b.maxX - b.minX, 0.5), (size.h - pad * 2) / Math.max(b.maxY - b.minY, 0.5))
-    return {
-      k,
-      tx: (size.w - (b.maxX - b.minX) * k) / 2 - b.minX * k,
-      ty: (size.h - (b.maxY - b.minY) * k) / 2 - b.minY * k,
-    }
+    return { ...toScreenFit(b, k), r }
   }
+
+  /** Translation that centers (already rotated) bounds `b` at scale `k`. */
+  const toScreenFit = (b: ReturnType<typeof bounds>, k: number) => ({
+    k,
+    tx: (size.w - (b.maxX - b.minX) * k) / 2 - b.minX * k,
+    ty: (size.h - (b.maxY - b.minY) * k) / 2 - b.minY * k,
+  })
 
   /** Whether the view is still the automatic fit (the user hasn't panned or zoomed since). */
   const autoFit = useRef(true)
@@ -153,7 +180,7 @@ export function PlanCanvas(props: Props) {
     setView((v) => {
       const k = Math.min(5000, Math.max(2, v.k * factor))
       const f = k / v.k
-      return { k, tx: sx - (sx - v.tx) * f, ty: sy - (sy - v.ty) * f }
+      return { ...v, k, tx: sx - (sx - v.tx) * f, ty: sy - (sy - v.ty) * f }
     })
   }
 
@@ -175,7 +202,16 @@ export function PlanCanvas(props: Props) {
 
   const toWorld = (clientX: number, clientY: number): Vec => {
     const r = svgRef.current!.getBoundingClientRect()
-    return { x: (clientX - r.left - view.tx) / view.k, y: (clientY - r.top - view.ty) / view.k }
+    return rotate({ x: (clientX - r.left - view.tx) / view.k, y: (clientY - r.top - view.ty) / view.k }, -view.r)
+  }
+  const toScreen = (p: Vec) => toScreenOf(view, p)
+
+  const rotated = Math.abs(wrapAngle(view.r)) > 1e-6
+  /** Turn the view back to north-up, around the middle of the canvas. */
+  const resetRotation = () => {
+    const c = { x: size.w / 2, y: size.h / 2 }
+    const w = rotate({ x: (c.x - view.tx) / view.k, y: (c.y - view.ty) / view.k }, -view.r)
+    setView({ k: view.k, r: 0, tx: c.x - w.x * view.k, ty: c.y - w.y * view.k })
   }
 
   // ---------- snapping ----------
@@ -335,8 +371,12 @@ export function PlanCanvas(props: Props) {
 
   const startPinch = () => {
     const [a, b] = [...pointers.current.values()]
+    const m = mid(a, b)
     // Whatever the first finger started (a tap, a point being placed) is abandoned.
-    drag.current = { type: 'pinch', d0: Math.max(dist(a, b), 1), m0: relative(mid(a, b)), view }
+    drag.current = {
+      type: 'pinch', d0: Math.max(dist(a, b), 1), a0: Math.atan2(b.y - a.y, b.x - a.x),
+      w0: toWorld(m.x, m.y), view, rotating: false,
+    }
     setCursor(null)
   }
 
@@ -358,6 +398,17 @@ export function PlanCanvas(props: Props) {
       return
     }
     if (e.button !== 0) return
+
+    const calibHit = hitOf(e)
+    if (calibHit?.kind === 'calib') {
+      drag.current = { type: 'calib', idx: calibHit.idx, start: world, orig: calibPts[calibHit.idx], started: false, sx: e.clientX, sy: e.clientY }
+      return
+    }
+    // while the scale is being entered, its line can only be adjusted
+    if (props.pendingCalibration) {
+      drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, view }
+      return
+    }
 
     if (!editing || tool === 'select') {
       const hit = hitOf(e)
@@ -437,13 +488,22 @@ export function PlanCanvas(props: Props) {
       if (!b) return
       const m = relative(mid(a, b))
       const k = Math.min(5000, Math.max(2, (d.view.k * dist(a, b)) / d.d0))
+      const angle = Math.atan2(b.y - a.y, b.x - a.x)
+      if (!d.rotating && Math.abs(wrapAngle(angle - d.a0)) > ROTATE_THRESHOLD) {
+        // start rotating from here, so the view doesn't jump by the threshold
+        d.rotating = true
+        d.a0 = angle
+      }
+      let r = d.view.r
+      if (d.rotating) {
+        r = wrapAngle(r + angle - d.a0)
+        const right = Math.round(r / (Math.PI / 2)) * (Math.PI / 2)
+        if (Math.abs(r - right) < ROTATE_SNAP) r = right
+      }
       // keep the world point that was under the fingers' midpoint under it
       autoFit.current = false
-      setView({
-        k,
-        tx: m.x - ((d.m0.x - d.view.tx) / d.view.k) * k,
-        ty: m.y - ((d.m0.y - d.view.ty) / d.view.k) * k,
-      })
+      const s = mul(rotate(d.w0, r), k)
+      setView({ k, r, tx: m.x - s.x, ty: m.y - s.y })
       return
     }
     if (d?.type === 'idle') return
@@ -460,10 +520,23 @@ export function PlanCanvas(props: Props) {
     }
     if (d && 'started' in d && !d.started) {
       if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < DRAG_THRESHOLD) return
-      props.checkpoint()
+      if (d.type !== 'calib') props.checkpoint()
       d.started = true
     }
     const s = snapSettings(e)
+    if (d?.type === 'calib') {
+      const other = calibPts[1 - d.idx]
+      const res = snapPoint(add(d.orig, sub(world, d.start)), allTargets(), view.k, s, other)
+      setCursor(res)
+      if (props.pendingCalibration) {
+        const line = [...props.pendingCalibration] as [Vec, Vec]
+        line[d.idx] = res.p
+        props.onCalibrationChange?.(line)
+      } else {
+        setCalibStart(res.p)
+      }
+      return
+    }
     if (d?.type === 'vertex') {
       const room = floor.rooms.find((r) => r.id === d.roomId)!
       const others = floor.rooms.filter((r) => r.id !== d.roomId).map((r) => r.points)
@@ -518,7 +591,7 @@ export function PlanCanvas(props: Props) {
       place(snapFor(toWorld(e.clientX, e.clientY), e).p)
     }
     if (d?.type === 'vertex' && !d.started) setActiveVertex(d.idx)
-    if (d?.type === 'vertex' || d?.type === 'edge') setCursor(null)
+    if (d?.type === 'vertex' || d?.type === 'edge' || d?.type === 'calib') setCursor(null)
     if (d?.type === 'rect' && rectPts.length === 1 && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > DRAG_THRESHOLD) {
       setRectPts([rectPts[0], snapFor(toWorld(e.clientX, e.clientY), e).p])
     }
@@ -623,55 +696,57 @@ export function PlanCanvas(props: Props) {
   }, [])
 
   // ---------- rendering ----------
+  // Everything except the stencil is drawn in canvas pixels rather than inside a scaled group,
+  // so lines and text are rasterized at their final size and stay sharp at any zoom.
 
   const k = view.k
-  const px = (n: number) => n / k
+  const S = toScreen
+  const pointsAttr = (pts: Vec[]) => pts.map(S).map((p) => `${p.x},${p.y}`).join(' ')
   const showHandles = editing && tool === 'select' && selected
   const drawing = editing && tool !== 'select'
 
   const roomEls = floor.rooms.map((room) => {
     const isSel = room.id === selectedId
     const isHover = hover?.endsWith(room.id)
-    const lp = labelPoint(room.points)
+    const lp = S(labelPoint(room.points))
     const open = props.openTodoCount(room)
     // the small map outside the editor has no room for labels of small rooms
-    const rb = bounds(room.points)
-    const showName = editing || ((rb.maxX - rb.minX) * k > room.name.length * 7 + 8 && (rb.maxY - rb.minY) * k > 40)
-    const badgeY = showName ? lp.y + px(14) : lp.y
+    const rb = bounds(room.points.map(S))
+    const showName = editing || (rb.maxX - rb.minX > room.name.length * 7 + 8 && rb.maxY - rb.minY > 40)
+    const badgeY = showName ? lp.y + 14 : lp.y
     return (
       <g key={room.id}>
         <polygon
           data-hit={`room:${room.id}`}
-          points={room.points.map((p) => `${p.x},${p.y}`).join(' ')}
+          points={pointsAttr(room.points)}
           fill={room.color}
           // outside the editor, rooms with open TODOs stand out as hot spots
           fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.85 : (open ? 0.6 : 0.2) + (isHover ? 0.15 : 0)}
           stroke={isSel ? '#2563eb' : editing ? '#44403c' : '#78716c'}
           strokeWidth={isSel ? 2.5 : editing ? 1.25 : 1.5}
           strokeLinejoin="round"
-          vectorEffect="non-scaling-stroke"
           className={drawing ? 'pointer-events-none' : 'cursor-pointer'}
         />
         {showName && <text
           x={lp.x}
           y={lp.y}
-          fontSize={px(13)}
+          fontSize={13}
           textAnchor="middle"
           className="pointer-events-none select-none fill-stone-800 font-medium"
-          style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: px(3), strokeOpacity: 0.8 }}
+          style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 3, strokeOpacity: 0.8 }}
         >
           {room.name}
           {editing && (
-            <tspan x={lp.x} dy={px(15)} fontSize={px(11)} className="fill-stone-600 font-normal">
+            <tspan x={lp.x} dy={15} fontSize={11} className="fill-stone-600 font-normal">
               {fmtArea(area(room.points))}
             </tspan>
           )}
         </text>}
         {!editing && open > 0 && (
           <g className="pointer-events-none">
-            <circle cx={lp.x} cy={badgeY} r={px(9)} className="fill-amber-500" />
+            <circle cx={lp.x} cy={badgeY} r={9} className="fill-amber-500" />
             <text
-              x={lp.x} y={badgeY} fontSize={px(11)} textAnchor="middle" dominantBaseline="central"
+              x={lp.x} y={badgeY} fontSize={11} textAnchor="middle" dominantBaseline="central"
               className="select-none fill-white font-semibold"
             >
               {open}
@@ -684,7 +759,8 @@ export function PlanCanvas(props: Props) {
 
   let handleEls: ReactNode = null
   if (showHandles && selected) {
-    const pts = selected.points
+    const pts = selected.points.map(S)
+    const c = S(labelPoint(selected.points))
     handleEls = (
       <g>
         {pts.map((a, i) => {
@@ -694,30 +770,29 @@ export function PlanCanvas(props: Props) {
           const l = len(e1)
           // label offset to the outside (polygons may be either winding)
           const n = l ? { x: -e1.y / l, y: e1.x / l } : { x: 0, y: 0 }
-          const c = labelPoint(pts)
           const out = dot(sub(m, c), n) > 0 ? n : mul(n, -1)
-          const lpos = add(m, mul(out, px(14)))
+          const lpos = add(m, mul(out, 14))
           return (
             <g key={i}>
               <line
                 data-hit={`edge:${selected.id}:${i}`}
                 x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                stroke="transparent" strokeWidth={18} vectorEffect="non-scaling-stroke"
+                stroke="transparent" strokeWidth={18}
                 style={{ cursor: Math.abs(e1.x) > Math.abs(e1.y) ? 'ns-resize' : 'ew-resize' }}
               />
               <text
-                x={lpos.x} y={lpos.y} fontSize={px(11)} textAnchor="middle" dominantBaseline="middle"
+                x={lpos.x} y={lpos.y} fontSize={11} textAnchor="middle" dominantBaseline="middle"
                 className="pointer-events-none select-none fill-blue-700"
-                style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: px(3) }}
+                style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 3 }}
               >
-                {fmtLen(l)}
+                {fmtLen(l / k)}
               </text>
               <g data-hit={`mid:${selected.id}:${i}`} className="group cursor-copy">
-                <circle cx={m.x} cy={m.y} r={px(12)} fill="transparent" />
+                <circle cx={m.x} cy={m.y} r={12} fill="transparent" />
                 <circle
-                  cx={m.x} cy={m.y} r={px(4.5)}
+                  cx={m.x} cy={m.y} r={4.5}
                   className="fill-white stroke-blue-500 opacity-60 group-hover:opacity-100"
-                  strokeWidth={1.5} vectorEffect="non-scaling-stroke"
+                  strokeWidth={1.5}
                 />
               </g>
             </g>
@@ -725,11 +800,11 @@ export function PlanCanvas(props: Props) {
         })}
         {pts.map((p, i) => (
           <g key={`v${i}`} data-hit={`vertex:${selected.id}:${i}`} className="cursor-move">
-            <circle cx={p.x} cy={p.y} r={px(16)} fill="transparent" />
+            <circle cx={p.x} cy={p.y} r={16} fill="transparent" />
             <circle
-              cx={p.x} cy={p.y} r={px(i === activeVertex ? 8 : 6)}
+              cx={p.x} cy={p.y} r={i === activeVertex ? 8 : 6}
               className={i === activeVertex ? 'fill-blue-600 stroke-white' : 'fill-white stroke-blue-600'}
-              strokeWidth={2} vectorEffect="non-scaling-stroke"
+              strokeWidth={2}
             />
           </g>
         ))}
@@ -737,21 +812,23 @@ export function PlanCanvas(props: Props) {
     )
   }
 
-  const guideEls = (cursor?.guides ?? []).map((g: Guide, i) =>
-    g.kind === 'ref' ? (
+  const guideEls = (cursor?.guides ?? []).map((g: Guide, i) => {
+    const a = S(g.a)
+    const b = S(g.b)
+    return g.kind === 'ref' ? (
       <line
-        key={i} x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y}
-        stroke="#0891b2" strokeOpacity={0.5} strokeWidth={9} strokeLinecap="round" vectorEffect="non-scaling-stroke"
+        key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+        stroke="#0891b2" strokeOpacity={0.5} strokeWidth={9} strokeLinecap="round"
         className="pointer-events-none"
       />
     ) : (
       <line
-        key={i} x1={g.a.x} y1={g.a.y} x2={g.b.x} y2={g.b.y}
-        stroke="#0891b2" strokeWidth={1} strokeDasharray="4 3" vectorEffect="non-scaling-stroke"
+        key={i} x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+        stroke="#0891b2" strokeWidth={1} strokeDasharray="4 3"
         className="pointer-events-none"
       />
-    ),
-  )
+    )
+  })
 
   let draftEls: ReactNode = null
   const cp = cursor?.p
@@ -761,28 +838,22 @@ export function PlanCanvas(props: Props) {
     draftEls = (
       <g className="pointer-events-none">
         {draft.length >= 2 && (
-          <polygon points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill="#3b82f6" fillOpacity={0.12} stroke="none" />
+          <polygon points={pointsAttr(pts)} fill="#3b82f6" fillOpacity={0.12} stroke="none" />
         )}
-        <polyline
-          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-          fill="none" stroke="#2563eb" strokeWidth={2} vectorEffect="non-scaling-stroke"
-        />
-        {draft.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={px(i === 0 ? 6 : 4)} className={i === 0 ? 'fill-blue-600' : 'fill-white stroke-blue-600'} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <polyline points={pointsAttr(pts)} fill="none" stroke="#2563eb" strokeWidth={2} />
+        {draft.map(S).map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={i === 0 ? 6 : 4} className={i === 0 ? 'fill-blue-600' : 'fill-white stroke-blue-600'} strokeWidth={1.5} />
         ))}
-        {cp && <MeasureLabel a={last} b={cp} k={k} text={lengthInput ? `${lengthInput} m ⏎` : undefined} />}
+        {cp && <MeasureLabel a={last} b={cp} toScreen={S} text={lengthInput ? `${lengthInput} m ⏎` : undefined} />}
       </g>
     )
   } else if (drawing && tool === 'rect' && rectPreview(cp)) {
     const pts = rectPreview(cp)!
     draftEls = (
       <g className="pointer-events-none">
-        <polygon
-          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-          fill="#3b82f6" fillOpacity={0.12} stroke="#2563eb" strokeWidth={2} vectorEffect="non-scaling-stroke"
-        />
-        <MeasureLabel a={pts[0]} b={pts[1]} k={k} />
-        {pts.length === 4 && <MeasureLabel a={pts[1]} b={pts[2]} k={k} />}
+        <polygon points={pointsAttr(pts)} fill="#3b82f6" fillOpacity={0.12} stroke="#2563eb" strokeWidth={2} />
+        <MeasureLabel a={pts[0]} b={pts[1]} toScreen={S} />
+        {pts.length === 4 && <MeasureLabel a={pts[1]} b={pts[2]} toScreen={S} />}
       </g>
     )
   }
@@ -793,47 +864,59 @@ export function PlanCanvas(props: Props) {
     draftEls = (
       <g className="pointer-events-none">
         {target && (
-          <polygon
-            points={target.points.map((p) => `${p.x},${p.y}`).join(' ')}
-            fill="none" stroke="#0891b2" strokeWidth={3} strokeDasharray="6 4" vectorEffect="non-scaling-stroke"
-          />
+          <polygon points={pointsAttr(target.points)} fill="none" stroke="#0891b2" strokeWidth={3} strokeDasharray="6 4" />
         )}
-        <polyline
-          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-          fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" vectorEffect="non-scaling-stroke"
-        />
-        {cut.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={px(4)} className="fill-white stroke-red-600" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+        <polyline points={pointsAttr(pts)} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" />
+        {cut.map(S).map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={4} className="fill-white stroke-red-600" strokeWidth={1.5} />
         ))}
-        {cp && <MeasureLabel a={cut[cut.length - 1]} b={cp} k={k} />}
+        {cp && <MeasureLabel a={cut[cut.length - 1]} b={cp} toScreen={S} />}
       </g>
     )
   }
 
-  const calib = props.pendingCalibration ?? (calibStart && cp ? [calibStart, cp] as [Vec, Vec] : null)
-  const calibEls = calib && (
-    <g className="pointer-events-none">
-      <line
-        x1={calib[0].x} y1={calib[0].y} x2={calib[1].x} y2={calib[1].y}
-        stroke="#ea580c" strokeWidth={2.5} vectorEffect="non-scaling-stroke"
-      />
-      {calib.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={px(5)} className="fill-orange-500" />
+  // The scale line. Its placed ends are handles that can be dragged to fine-tune them.
+  const calibDragging = drag.current?.type === 'calib'
+  const calibLine: Vec[] | null =
+    calibPts.length === 2 ? calibPts
+    : calibStart && cp && drawing && tool === 'calibrate' && !calibDragging ? [calibStart, cp]
+    : null
+  const calibEls = calibPts.length > 0 && (
+    <g>
+      {calibLine && (() => {
+        const [a, b] = calibLine.map(S)
+        return (
+          <g className="pointer-events-none">
+            <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="white" strokeOpacity={0.8} strokeWidth={5} strokeLinecap="round" />
+            <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#ea580c" strokeWidth={2} />
+            <MeasureLabel a={calibLine[0]} b={calibLine[1]} toScreen={S} />
+          </g>
+        )
+      })()}
+      {calibPts.map(S).map((p, i) => (
+        <g key={i} data-hit={`calib::${i}`} className="cursor-move">
+          <circle cx={p.x} cy={p.y} r={22} fill="transparent" />
+          <circle cx={p.x} cy={p.y} r={9} fill="white" fillOpacity={0.35} stroke="#ea580c" strokeWidth={2} />
+          <circle cx={p.x} cy={p.y} r={1.75} fill="#ea580c" />
+        </g>
       ))}
     </g>
   )
 
-  const cursorEl = drawing && cp && cursor && (
-    <g className="pointer-events-none">
-      {cursor.kind === 'vertex' ? (
-        <rect x={cp.x - px(6)} y={cp.y - px(6)} width={px(12)} height={px(12)} fill="none" stroke="#0891b2" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-      ) : cursor.kind === 'edge' ? (
-        <path d={`M${cp.x - px(6)},${cp.y + px(5)} L${cp.x},${cp.y - px(6)} L${cp.x + px(6)},${cp.y + px(5)} Z`} fill="none" stroke="#0891b2" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-      ) : (
-        <circle cx={cp.x} cy={cp.y} r={px(3.5)} fill={cursor.kind === 'none' ? '#2563eb' : '#0891b2'} />
-      )}
-    </g>
-  )
+  const cursorEl = (drawing || calibDragging) && cp && cursor && (() => {
+    const c = S(cp)
+    return (
+      <g className="pointer-events-none">
+        {cursor.kind === 'vertex' ? (
+          <rect x={c.x - 6} y={c.y - 6} width={12} height={12} fill="none" stroke="#0891b2" strokeWidth={2} />
+        ) : cursor.kind === 'edge' ? (
+          <path d={`M${c.x - 6},${c.y + 5} L${c.x},${c.y - 6} L${c.x + 6},${c.y + 5} Z`} fill="none" stroke="#0891b2" strokeWidth={2} />
+        ) : calibDragging ? null : (
+          <circle cx={c.x} cy={c.y} r={3.5} fill={cursor.kind === 'none' ? '#2563eb' : '#0891b2'} />
+        )}
+      </g>
+    )
+  })()
 
   const svgCursor = drag.current?.type === 'pan' ? 'grabbing' : drawing ? 'crosshair' : 'default'
 
@@ -869,22 +952,22 @@ export function PlanCanvas(props: Props) {
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <g transform={`translate(${view.tx} ${view.ty}) scale(${k})`}>
-          {bd && props.imageUrl && props.showBackdrop && (
+        {bd && props.imageUrl && props.showBackdrop && (
+          <g transform={`translate(${view.tx} ${view.ty}) rotate(${(view.r * 180) / Math.PI}) scale(${k})`}>
             <image
               href={props.imageUrl}
               x={bd.x} y={bd.y} width={bd.width * bd.scale} height={bd.height * bd.scale}
               transform={backdropTransform(bd)}
               opacity={bd.opacity} preserveAspectRatio="none" className="pointer-events-none"
             />
-          )}
-          {roomEls}
-          {handleEls}
-          {guideEls}
-          {draftEls}
-          {calibEls}
-          {cursorEl}
-        </g>
+          </g>
+        )}
+        {roomEls}
+        {handleEls}
+        {guideEls}
+        {draftEls}
+        {calibEls}
+        {cursorEl}
       </svg>
 
       {actions.length > 0 && (
@@ -903,13 +986,20 @@ export function PlanCanvas(props: Props) {
           </div>
         </div>
       )}
-      {(editing || !isFitted) && (
+      {(editing || !isFitted || rotated) && (
         <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
           {editing && (
             <>
               <ZoomButton label="+" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)} />
               <ZoomButton label="−" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)} />
             </>
+          )}
+          {rotated && (
+            <ZoomButton
+              label={<span className="inline-block font-semibold text-red-600" style={{ transform: `rotate(${view.r}rad)` }}>↑</span>}
+              title="Reset rotation"
+              onClick={resetRotation}
+            />
           )}
           {!isFitted && <ZoomButton label="⤢" title="Fit to content" onClick={() => fitToContent()} />}
         </div>
@@ -943,22 +1033,24 @@ function alignMove(orig: Vec[], delta: Vec, others: Room[], tol: number): Vec {
   return out
 }
 
-function MeasureLabel({ a, b, k, text }: { a: Vec; b: Vec; k: number; text?: string }) {
-  const m = mid(a, b)
-  const l = dist(a, b)
-  if (l * k < 20 && !text) return null
+/** Length of the world segment a–b, shown just above its middle on screen. */
+function MeasureLabel({ a, b, toScreen, text }: { a: Vec; b: Vec; toScreen: (p: Vec) => Vec; text?: string }) {
+  const sa = toScreen(a)
+  const sb = toScreen(b)
+  const m = mid(sa, sb)
+  if (dist(sa, sb) < 20 && !text) return null
   return (
     <text
-      x={m.x} y={m.y - 10 / k} fontSize={12 / k} textAnchor="middle"
-      className="select-none fill-blue-800 font-semibold"
-      style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 4 / k }}
+      x={m.x} y={m.y - 10} fontSize={12} textAnchor="middle"
+      className="pointer-events-none select-none fill-blue-800 font-semibold"
+      style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 4 }}
     >
-      {text ?? fmtLen(l)}
+      {text ?? fmtLen(dist(a, b))}
     </text>
   )
 }
 
-function ZoomButton({ label, title, onClick }: { label: string; title?: string; onClick: () => void }) {
+function ZoomButton({ label, title, onClick }: { label: ReactNode; title?: string; onClick: () => void }) {
   return (
     <button
       title={title}
