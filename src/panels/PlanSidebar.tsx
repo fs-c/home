@@ -5,17 +5,9 @@ import { area, fmtArea } from '../lib/geometry'
 import type { Backdrop, Floor } from '../model/types'
 import { Button, Check, Kbd, Section, Slider } from './ui'
 
-export interface WandSettings {
-  threshold: number
-  ignoreColor: boolean
-  minWallCm: number
-  maxOpeningCm: number
-  showMask: boolean
-}
-
 export function PlanSidebar({
-  floor, selectedId, onSelect, onUpload, onBackdrop, onRemoveBackdrop, tool, setTool,
-  snap, setSnap, wand, setWand,
+  floor, selectedId, onSelect, onUpload, onBackdrop, onRemoveBackdrop, setTool,
+  snap, setSnap,
 }: {
   floor: Floor
   selectedId: string | null
@@ -23,12 +15,9 @@ export function PlanSidebar({
   onUpload: (file: File) => void
   onBackdrop: (patch: Partial<Backdrop>) => void
   onRemoveBackdrop: () => void
-  tool: Tool
   setTool: (t: Tool) => void
   snap: SnapSettings
   setSnap: (s: SnapSettings) => void
-  wand: WandSettings
-  setWand: (w: WandSettings) => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const bd = floor.backdrop
@@ -90,7 +79,7 @@ export function PlanSidebar({
       <Section step="3" title="Rooms" right={floor.rooms.length > 0 && <span className="text-xs text-stone-500">{fmtArea(total)}</span>}>
         {floor.rooms.length === 0 ? (
           <p className="text-sm text-stone-500">
-            Trace rooms with the <b>magic wand</b> <Kbd>W</Kbd> (click inside a room on the plan), or draw them as <b>rectangles</b> <Kbd>R</Kbd> or <b>polygons</b> <Kbd>P</Kbd>. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones – so on a rotated plan, getting the first wall right makes the rest easy.
+            Draw rooms as <b>rectangles</b> <Kbd>R</Kbd> or <b>polygons</b> <Kbd>P</Kbd>. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones – so on a rotated plan, getting the first wall right makes the rest easy.
             <span className="mt-2 block">
               Or trace the whole outline first, then cut it into rooms with <b>split</b> <Kbd>X</Kbd>.
             </span>
@@ -112,37 +101,6 @@ export function PlanSidebar({
           </ul>
         )}
       </Section>
-
-      {tool === 'wand' && (
-        <Section title="Wand detection">
-          <div className="space-y-3">
-            <Slider
-              label="Wall darkness" value={wand.threshold} min={40} max={240} step={5}
-              onChange={(threshold) => setWand({ ...wand, threshold })}
-            />
-            <Slider
-              label="Ignore lines thinner than" value={wand.minWallCm} min={0} max={30} step={1}
-              format={(v) => `${v} cm`}
-              onChange={(minWallCm) => setWand({ ...wand, minWallCm })}
-            />
-            <Slider
-              label="Close openings up to" value={wand.maxOpeningCm} min={0} max={250} step={5}
-              format={(v) => `${v} cm`}
-              onChange={(maxOpeningCm) => setWand({ ...wand, maxOpeningCm })}
-            />
-            <Check
-              label="Treat coloured markings as paper"
-              checked={wand.ignoreColor}
-              onChange={(ignoreColor) => setWand({ ...wand, ignoreColor })}
-            />
-            <Check label="Show detected walls" checked={wand.showMask} onChange={(showMask) => setWand({ ...wand, showMask })} />
-            <p className="text-xs text-stone-500">
-              Red = what counts as wall. Text and furniture should disappear; walls should stay solid. If a room leaks
-              into its neighbour, raise "close openings".
-            </p>
-          </div>
-        </Section>
-      )}
 
       <Section title="Snapping">
         <Check label="Snap to corners & walls" checked={snap.enabled} onChange={(enabled) => setSnap({ ...snap, enabled })} hint={<Kbd>Alt</Kbd>} />

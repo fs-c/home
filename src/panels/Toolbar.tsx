@@ -3,7 +3,6 @@ import { Kbd } from './ui'
 
 export const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select & edit', key: 'V', icon: '↖' },
-  { id: 'wand', label: 'Magic wand', key: 'W', icon: '✦' },
   { id: 'rect', label: 'Rectangle', key: 'R', icon: '▭' },
   { id: 'polygon', label: 'Polygon', key: 'P', icon: '⬠' },
   { id: 'split', label: 'Split', key: 'X', icon: '✂' },
@@ -12,7 +11,6 @@ export const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
 
 const HINTS: Record<Tool, string[]> = {
   select: ['Click a room to select', 'Drag corners, walls or the whole room', 'Click ◦ on a wall to add a corner', 'Double-click a corner to remove it', 'Del removes the room'],
-  wand: ['Click inside a room on the plan to detect its walls', 'Tune detection in the sidebar if it leaks or misses'],
   rect: ['Draw one wall (drag, or click both ends)', 'then click to set the depth'],
   polygon: ['Click to add corners', 'Type a number + ⏎ for an exact wall length', 'Click the first corner or ⏎ to finish', '⌫ removes last corner'],
   split: ['Click a wall to start the cut', 'click inside for bends', 'click the opposite wall to split the room', '⌫ removes last point'],

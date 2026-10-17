@@ -15,7 +15,6 @@ pnpm dev
 
 1. **Plan** mode: upload a floor plan (image or PDF) as a stencil, set the scale
    by measuring a known dimension, then trace rooms:
-   - **Magic wand** (W): click inside a room; walls are detected from the image.
    - **Rectangle** (R) / **Polygon** (P): manual drawing with snapping to existing
      corners/walls, angles snapping parallel/perpendicular to existing walls,
      alignment guides and typed lengths.
@@ -34,28 +33,13 @@ or requirements. Nothing about them is set in stone.
 
 ```sh
 pnpm typecheck     # app + tests
-pnpm test          # unit tests (Vitest): geometry, snapping, room detection
-pnpm test:e2e      # browser tests (Playwright; first run: pnpm exec playwright install chromium)
-```
-
-- `tests/unit` – pure logic, fast.
-- `tests/e2e` – full flows in Chromium against the dev server: tracing with the
-  wand and manual tools, PDF upload, export/import, and tracing the rotated photo
-  in `samples/` (skipped if the sample is absent). Fixtures live in
-  `tests/e2e/fixtures`; `make-plan.mjs` regenerates the synthetic plan.
-- Set `PLAYWRIGHT_OUTPUT_DIR` to put test artifacts somewhere other than `test-results/`.
-
-To tune room detection against a real plan, render what the wand sees:
-
-```sh
-pnpm wand-harness samples/stockhofstrasse-top37.jpg '{"kitchen":[1140,1600]}'
-# → test-results/wand-harness.png (wall mask in red, detected rooms in green)
+pnpm test          # unit tests (Vitest): geometry, snapping
 ```
 
 ## Layout
 
 - `src/model` – document types, persistence, undo history
-- `src/editor` – canvas (SVG), snapping, magic-wand room detection
+- `src/editor` – canvas (SVG), snapping
 - `src/panels` – sidebars, toolbar, room details
 - `src/lib` – geometry helpers, file loading
-- `tests/` – unit and e2e tests; `scripts/` – dev tools
+- `tests/unit` – unit tests for pure logic

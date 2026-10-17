@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { PlanCanvas, type Mode, type Tool } from './editor/PlanCanvas'
 import type { SnapSettings } from './editor/snapping'
 import { isTyping } from './lib/dom'
@@ -11,7 +11,7 @@ import type { Backdrop, Floor, HomeDoc, Room, Vec } from './model/types'
 import { useHistory } from './model/useHistory'
 import { CalibrateDialog, straightenAngle } from './panels/CalibrateDialog'
 import { HomeSidebar } from './panels/HomeSidebar'
-import { PlanSidebar, type WandSettings } from './panels/PlanSidebar'
+import { PlanSidebar } from './panels/PlanSidebar'
 import { RoomPanel } from './panels/RoomPanel'
 import { Toolbar, TOOLS } from './panels/Toolbar'
 import { Button } from './panels/ui'
@@ -25,7 +25,6 @@ export default function App() {
   const [tool, setTool] = useState<Tool>('select')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [snap, setSnap] = useState<SnapSettings>({ enabled: true, angles: true })
-  const [wand, setWand] = useState<WandSettings>({ threshold: 140, ignoreColor: false, minWallCm: 6, maxOpeningCm: 110, showMask: false })
   const [showBackdropAtHome, setShowBackdropAtHome] = useState(false)
   const [fitRequest, setFitRequest] = useState<{ n: number; focus?: Vec[] }>({ n: 0 })
   const refit = (focus?: Vec[]) => setFitRequest((r) => ({ n: r.n + 1, focus }))
@@ -111,9 +110,9 @@ export default function App() {
       rooms: fl.rooms.map((r) => ({ ...r, points: r.points.map(mapPt) })),
     }))
     setCalibration(null)
-    setTool('wand')
+    setTool('rect')
     refit([...calibration.map(mapPt), ...floor.rooms.flatMap((r) => r.points.map(mapPt))])
-    setMessage('Scale set. Next: click inside a room with the magic wand, or draw rooms with R / P.')
+    setMessage('Scale set. Next: draw rooms with R / P, or trace the outline and split it with X.')
   }
 
   const addFloor = () => {
@@ -185,16 +184,6 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [history.undo, history.redo, mode])
 
-  const wandParams = useMemo(() => {
-    const cmToPx = (cm: number) => (bd ? cm / 100 / bd.scale : 0)
-    return {
-      threshold: wand.threshold,
-      ignoreColor: wand.ignoreColor,
-      minWallPx: cmToPx(wand.minWallCm),
-      maxOpeningPx: cmToPx(wand.maxOpeningCm),
-    }
-  }, [wand, bd])
-
   const openTodoCount = useCallback((r: Room) => r.items.filter((i) => i.kind === 'todo' && !i.done).length, [])
 
   return (
@@ -265,12 +254,9 @@ export default function App() {
               onUpload={(f) => void upload(f)}
               onBackdrop={patchBackdrop}
               onRemoveBackdrop={() => commitFloor((f) => ({ ...f, backdrop: undefined }))}
-              tool={tool}
               setTool={setTool}
               snap={snap}
               setSnap={setSnap}
-              wand={wand}
-              setWand={setWand}
             />
           ) : (
             <HomeSidebar
@@ -301,8 +287,6 @@ export default function App() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             snap={snap}
-            wandParams={wandParams}
-            showWallMask={wand.showMask}
             showBackdrop={mode === 'plan' ? !!bd?.visible : showBackdropAtHome}
             fitRequest={fitRequest}
             pendingCalibration={calibration}

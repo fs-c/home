@@ -7,11 +7,6 @@ export function imageToWorld(bd: Backdrop, p: Vec): Vec {
   return rotate({ x: bd.x + p.x * bd.scale, y: bd.y + p.y * bd.scale }, bd.rotation ?? 0, origin)
 }
 
-export function worldToImage(bd: Backdrop, w: Vec): Vec {
-  const q = rotate(w, -(bd.rotation ?? 0), { x: bd.x, y: bd.y })
-  return { x: (q.x - bd.x) / bd.scale, y: (q.y - bd.y) / bd.scale }
-}
-
 export function backdropCorners(bd: Backdrop): Vec[] {
   return [
     { x: 0, y: 0 }, { x: bd.width, y: 0 }, { x: bd.width, y: bd.height }, { x: 0, y: bd.height },

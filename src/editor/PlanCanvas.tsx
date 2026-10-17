@@ -8,11 +8,10 @@ import { isTyping } from '../lib/dom'
 import { nextRoomColor, nextRoomName } from '../model/doc'
 import { uid } from '../model/ids'
 import type { Floor, Room, Vec } from '../model/types'
-import { detectRoom, prepareImage, wallMaskOverlay, type PreparedImage, type WandParams } from './magicWand'
 import { mainFrame, snapPoint, targetsFrom, type Guide, type SnapResult, type SnapSettings } from './snapping'
-import { backdropCorners, backdropTransform, imageToWorld, worldToImage } from '../model/backdrop'
+import { backdropCorners, backdropTransform } from '../model/backdrop'
 
-export type Tool = 'select' | 'polygon' | 'rect' | 'split' | 'wand' | 'calibrate'
+export type Tool = 'select' | 'polygon' | 'rect' | 'split' | 'calibrate'
 export type Mode = 'plan' | 'home'
 
 interface View {
@@ -37,8 +36,6 @@ interface Props {
   selectedId: string | null
   onSelect: (id: string | null) => void
   snap: SnapSettings
-  wandParams: WandParams
-  showWallMask: boolean
   showBackdrop: boolean
   /** Bump `n` to re-fit the view; with `focus`, fit around those points instead of everything. */
   fitRequest: { n: number; focus?: Vec[] }
@@ -52,16 +49,6 @@ interface Props {
 }
 
 const DRAG_THRESHOLD = 3
-const preparedCache = new Map<string, Promise<PreparedImage>>()
-
-function getPrepared(url: string) {
-  let p = preparedCache.get(url)
-  if (!p) {
-    p = prepareImage(url)
-    preparedCache.set(url, p)
-  }
-  return p
-}
 
 export function PlanCanvas(props: Props) {
   const { floor, mode, tool, selectedId, snap } = props
@@ -77,8 +64,6 @@ export function PlanCanvas(props: Props) {
   /** Split tool: the cut being drawn (starts and ends on a wall of one room). */
   const [cut, setCut] = useState<Vec[]>([])
   const [lengthInput, setLengthInput] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [maskUrl, setMaskUrl] = useState<string | null>(null)
   const [hover, setHover] = useState<string | null>(null)
   const drag = useRef<Drag | null>(null)
   const spaceDown = useRef(false)
@@ -164,26 +149,6 @@ export function PlanCanvas(props: Props) {
     const r = svgRef.current!.getBoundingClientRect()
     return { x: (clientX - r.left - view.tx) / view.k, y: (clientY - r.top - view.ty) / view.k }
   }
-
-  // ---------- wall mask preview ----------
-
-  const { threshold, ignoreColor, minWallPx, maxOpeningPx } = props.wandParams
-  const wantMask = editing && tool === 'wand' && props.showWallMask && !!props.imageUrl
-  useEffect(() => {
-    if (!wantMask || !props.imageUrl) {
-      setMaskUrl(null)
-      return
-    }
-    let cancelled = false
-    const t = setTimeout(async () => {
-      const img = await getPrepared(props.imageUrl!)
-      if (!cancelled) setMaskUrl(wallMaskOverlay(img, { threshold, ignoreColor, minWallPx, maxOpeningPx }))
-    }, 150)
-    return () => {
-      cancelled = true
-      clearTimeout(t)
-    }
-  }, [wantMask, props.imageUrl, threshold, ignoreColor, minWallPx, maxOpeningPx])
 
   // ---------- snapping ----------
 
@@ -326,28 +291,6 @@ export function PlanCanvas(props: Props) {
     setDraft([...draft, p])
   }
 
-  const runWand = async (world: Vec) => {
-    if (!bd || !props.imageUrl) {
-      props.onMessage('Upload a floor plan first – the wand detects rooms on the image.')
-      return
-    }
-    setBusy(true)
-    try {
-      const img = await getPrepared(props.imageUrl)
-      const edges = floor.rooms.flatMap((r) => r.points.map((p, i) => [p, r.points[(i + 1) % r.points.length]] as [Vec, Vec]))
-      const [u] = mainFrame(edges)
-      const angleHint = edges.length ? Math.atan2(u.y, u.x) - (bd.rotation ?? 0) : undefined
-      const res = detectRoom(img, worldToImage(bd, world), { ...props.wandParams, angleHint })
-      if (!res.ok) {
-        props.onMessage(res.reason)
-        return
-      }
-      addRoom(res.polygon.map((p) => imageToWorld(bd, p)))
-    } finally {
-      setBusy(false)
-    }
-  }
-
   // ---------- pointer handling ----------
 
   const hitOf = (e: ReactPointerEvent | ReactMouseEvent) => {
@@ -424,8 +367,6 @@ export function PlanCanvas(props: Props) {
       }
     } else if (tool === 'split') {
       placeCutPoint(snapped)
-    } else if (tool === 'wand' && !busy) {
-      void runWand(world)
     }
   }
 
@@ -763,7 +704,7 @@ export function PlanCanvas(props: Props) {
     </g>
   )
 
-  const cursorEl = drawing && cp && cursor && tool !== 'wand' && (
+  const cursorEl = drawing && cp && cursor && (
     <g className="pointer-events-none">
       {cursor.kind === 'vertex' ? (
         <rect x={cp.x - px(6)} y={cp.y - px(6)} width={px(12)} height={px(12)} fill="none" stroke="#0891b2" strokeWidth={2} vectorEffect="non-scaling-stroke" />
@@ -775,14 +716,14 @@ export function PlanCanvas(props: Props) {
     </g>
   )
 
-  const svgCursor = drag.current?.type === 'pan' ? 'grabbing' : drawing ? (tool === 'wand' ? 'cell' : 'crosshair') : 'default'
+  const svgCursor = drag.current?.type === 'pan' ? 'grabbing' : drawing ? 'crosshair' : 'default'
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle,#d6d3d1_1px,transparent_1px)] [background-size:20px_20px]">
       <svg
         ref={svgRef}
         className="h-full w-full touch-none select-none"
-        style={{ cursor: busy ? 'wait' : svgCursor }}
+        style={{ cursor: svgCursor }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -797,14 +738,6 @@ export function PlanCanvas(props: Props) {
               x={bd.x} y={bd.y} width={bd.width * bd.scale} height={bd.height * bd.scale}
               transform={backdropTransform(bd)}
               opacity={bd.opacity} preserveAspectRatio="none" className="pointer-events-none"
-            />
-          )}
-          {bd && maskUrl && (
-            <image
-              href={maskUrl}
-              x={bd.x} y={bd.y} width={bd.width * bd.scale} height={bd.height * bd.scale}
-              transform={backdropTransform(bd)}
-              preserveAspectRatio="none" className="pointer-events-none"
             />
           )}
           {roomEls}
@@ -822,11 +755,6 @@ export function PlanCanvas(props: Props) {
         <ZoomButton label="⤢" title="Fit to content" onClick={() => fitToContent()} />
       </div>
       <ScaleBar k={k} />
-      {busy && (
-        <div className="absolute left-1/2 top-16 -translate-x-1/2 rounded-full bg-stone-900/80 px-3 py-1 text-xs text-white">
-          Detecting room…
-        </div>
-      )}
     </div>
   )
 }
