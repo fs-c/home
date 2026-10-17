@@ -37,6 +37,7 @@ async function tx<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBReq
 
 export const putImage = (id: string, blob: Blob) => tx('readwrite', (s) => s.put(blob, id))
 export const getImage = (id: string) => tx<Blob | undefined>('readonly', (s) => s.get(id))
+export const clearImages = () => tx('readwrite', (s) => s.clear())
 
 // Export / import as a single self-contained JSON file.
 

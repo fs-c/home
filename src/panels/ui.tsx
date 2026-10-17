@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { Floor } from '../model/types'
 
 /** Text inputs are 16px on small screens so iOS doesn't zoom in on focus. */
@@ -22,7 +22,7 @@ export function Section({ title, step, children, right }: { title: string; step?
 }
 
 export function Button({
-  children, onClick, variant = 'default', className = '', title, disabled, type = 'button',
+  children, onClick, variant = 'default', className = '', title, disabled, autoFocus, type = 'button',
 }: {
   children: ReactNode
   onClick?: () => void
@@ -30,6 +30,7 @@ export function Button({
   className?: string
   title?: string
   disabled?: boolean
+  autoFocus?: boolean
   type?: 'button' | 'submit'
 }) {
   const styles = {
@@ -43,6 +44,7 @@ export function Button({
       type={type}
       title={title}
       disabled={disabled}
+      autoFocus={autoFocus}
       onClick={onClick}
       className={`rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors disabled:opacity-40 ${styles} ${className}`}
     >
@@ -124,6 +126,45 @@ export function Menu({ items }: { items: { label: string; onClick: () => void }[
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+/** Modal yes/no question, e.g. before something destructive. Cancel has focus so Enter doesn't confirm by accident. */
+export function ConfirmDialog({
+  title, children, confirmLabel, danger, onConfirm, onCancel,
+}: {
+  title: string
+  children: ReactNode
+  confirmLabel: string
+  danger?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCancel()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return (
+    <div
+      role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" onClick={onCancel}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-stone-900/50 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] sm:items-center"
+    >
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+        <h2 id="confirm-title" className="text-lg font-semibold">{title}</h2>
+        <div className="mt-1 text-sm text-stone-500">{children}</div>
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="ghost" className="!py-2.5 sm:!py-1.5" onClick={onCancel} autoFocus>Cancel</Button>
+          <button
+            onClick={onConfirm}
+            className={`rounded-md px-2.5 py-2.5 text-sm font-medium text-white transition-colors sm:py-1.5 ${danger ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

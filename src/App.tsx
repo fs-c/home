@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { isTyping } from './lib/dom'
 import { newDoc, updateRoom } from './model/doc'
-import { exportDoc, getImage, importDoc, loadDoc, saveDoc } from './model/persistence'
+import { clearImages, exportDoc, getImage, importDoc, loadDoc, saveDoc } from './model/persistence'
 import type { HomeDoc, Room } from './model/types'
 import { useHistory } from './model/useHistory'
 import { HomeView } from './panels/HomeView'
 import { PlanEditor } from './panels/PlanEditor'
+import { ConfirmDialog } from './panels/ui'
 
 export default function App() {
   const history = useHistory<HomeDoc>(() => loadDoc() ?? newDoc())
@@ -17,6 +18,7 @@ export default function App() {
   const [message, setMessage] = useState<string | null>(null)
   const imageUrls = useImageUrls(doc)
   const importRef = useRef<HTMLInputElement>(null)
+  const [confirmReset, setConfirmReset] = useState(false)
 
   // ---------- persistence ----------
 
@@ -71,6 +73,16 @@ export default function App() {
     }
   }
 
+  const doReset = () => {
+    const next = newDoc()
+    history.reset(next)
+    setFloorId(next.floors[0].id)
+    setSelectedId(null)
+    setConfirmReset(false)
+    void clearImages().catch(() => {})
+    setMessage('Everything was reset.')
+  }
+
   // ---------- keyboard shortcuts ----------
 
   useEffect(() => {
@@ -122,6 +134,7 @@ export default function App() {
             { label: 'Rename…', onClick: renameHome },
             { label: 'Import backup…', onClick: () => importRef.current?.click() },
             { label: 'Export backup', onClick: () => void doExport() },
+            { label: 'Reset…', onClick: () => setConfirmReset(true) },
           ]}
         />
       )}
@@ -133,6 +146,18 @@ export default function App() {
           e.target.value = ''
         }}
       />
+      {confirmReset && (
+        <ConfirmDialog
+          title="Reset everything?"
+          confirmLabel="Reset"
+          danger
+          onConfirm={doReset}
+          onCancel={() => setConfirmReset(false)}
+        >
+          All floors, rooms, notes and uploaded plans will be deleted from this device. This can't be undone, so
+          export a backup first if you might want them back.
+        </ConfirmDialog>
+      )}
       {message && (
         <div className="pointer-events-none fixed inset-x-0 top-14 z-50 flex justify-center px-4">
           <div className="max-w-md rounded-lg bg-stone-900 px-4 py-2 text-sm text-white shadow-lg">{message}</div>
