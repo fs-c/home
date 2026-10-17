@@ -1,4 +1,8 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import type { Floor } from '../model/types'
+
+/** Text inputs are 16px on small screens so iOS doesn't zoom in on focus. */
+export const inputClass = 'rounded-md border border-stone-300 bg-white px-2 py-1.5 text-base md:text-sm focus:border-blue-500 focus:outline-none'
 
 export function Section({ title, step, children, right }: { title: string; step?: string; children: ReactNode; right?: ReactNode }) {
   return (
@@ -83,10 +87,69 @@ export function Slider({
 
 export function Check({ label, checked, onChange, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; hint?: ReactNode }) {
   return (
-    <label className="flex items-center gap-2 py-0.5 text-sm text-stone-700">
+    <label className="flex items-center gap-2 py-1.5 text-sm text-stone-700">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="accent-blue-600" />
       <span>{label}</span>
       {hint && <span className="ml-auto">{hint}</span>}
     </label>
+  )
+}
+
+export function Menu({ items }: { items: { label: string; onClick: () => void }[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <button
+        aria-label="Menu" onClick={() => setOpen(!open)}
+        className="flex h-9 w-9 items-center justify-center rounded-md text-xl text-stone-600 hover:bg-stone-100"
+      >
+        ⋯
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-1 w-52 rounded-lg border border-stone-200 bg-white py-1 shadow-lg">
+            {items.map((i) => (
+              <button
+                key={i.label}
+                onClick={() => {
+                  setOpen(false)
+                  i.onClick()
+                }}
+                className="block w-full px-4 py-2.5 text-left text-sm text-stone-700 hover:bg-stone-100"
+              >
+                {i.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+export function FloorTabs({
+  floors, current, onSelect, onAdd,
+}: {
+  floors: Floor[]
+  current: string
+  onSelect: (id: string) => void
+  onAdd?: () => void
+}) {
+  return (
+    <nav className="flex min-w-0 items-center gap-1 overflow-x-auto">
+      {floors.map((f) => (
+        <button
+          key={f.id}
+          onClick={() => onSelect(f.id)}
+          className={`shrink-0 rounded-full px-3 py-1 text-sm ${f.id === current ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-100'}`}
+        >
+          {f.name}
+        </button>
+      ))}
+      {onAdd && (
+        <button onClick={onAdd} className="shrink-0 rounded-full px-2.5 py-1 text-sm text-stone-500 hover:bg-stone-100">+ Floor</button>
+      )}
+    </nav>
   )
 }

@@ -22,7 +22,14 @@ interface View {
 }
 
 type Drag =
-  | { type: 'pan'; sx: number; sy: number; view: View }
+  /** `tap`: what to select if the pointer is released without panning (null = nothing). */
+  | { type: 'pan'; sx: number; sy: number; view: View; tap?: string | null; moved?: boolean }
+  /** Two-finger zoom/pan; `m0` is the start midpoint relative to the canvas. */
+  | { type: 'pinch'; d0: number; m0: Vec; view: View }
+  /** Touch drawing: the point follows the finger and is placed on release. */
+  | { type: 'aim' }
+  /** After a pinch, until all fingers are lifted. */
+  | { type: 'idle' }
   | { type: 'vertex'; roomId: string; idx: number; started: boolean; sx: number; sy: number }
   | { type: 'edge'; roomId: string; idx: number; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
   | { type: 'room'; roomId: string; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
@@ -65,7 +72,11 @@ export function PlanCanvas(props: Props) {
   const [cut, setCut] = useState<Vec[]>([])
   const [lengthInput, setLengthInput] = useState('')
   const [hover, setHover] = useState<string | null>(null)
+  /** Select tool: a corner tapped without dragging, offered for removal. */
+  const [activeVertex, setActiveVertex] = useState<number | null>(null)
   const drag = useRef<Drag | null>(null)
+  const pointers = useRef(new Map<number, Vec>())
+  const lastPointerType = useRef('mouse')
   const spaceDown = useRef(false)
 
   const editing = mode === 'plan'
@@ -79,6 +90,7 @@ export function PlanCanvas(props: Props) {
     setCut([])
     setLengthInput('')
   }, [tool, floor.id, mode])
+  useEffect(() => setActiveVertex(null), [tool, selectedId])
 
   // ---------- viewport ----------
 
@@ -90,29 +102,36 @@ export function PlanCanvas(props: Props) {
     return () => ro.disconnect()
   }, [])
 
-  const fitToContent = (focus?: Vec[]) => {
-    if (!size.w || !size.h) return
+  /** The view that shows all rooms (in the editor also the visible stencil), or around `focus`. */
+  const computeFit = (focus?: Vec[]): View | null => {
+    if (!size.w || !size.h) return null
     const pts: Vec[] = focus ? [...focus] : floor.rooms.flatMap((r) => r.points)
     if (focus) {
       // leave some context (≥ 3 m, as the plan is calibrated by now) around the focus
       const fb = bounds(focus)
       const m = Math.max(0.3 * Math.max(fb.maxX - fb.minX, fb.maxY - fb.minY), 3)
       pts.push({ x: fb.minX - m, y: fb.minY - m }, { x: fb.maxX + m, y: fb.maxY + m })
-    } else if (bd && (bd.visible || mode === 'plan')) {
+    } else if (bd && editing && props.showBackdrop) {
       pts.push(...backdropCorners(bd))
     }
-    if (!pts.length) {
-      setView({ tx: size.w / 2 - 250, ty: size.h / 2 - 200, k: 50 })
-      return
-    }
+    if (!pts.length) return { tx: size.w / 2 - 250, ty: size.h / 2 - 200, k: 50 }
     const b = bounds(pts)
-    const pad = 48
+    const pad = editing ? 48 : 12
     const k = Math.min((size.w - pad * 2) / Math.max(b.maxX - b.minX, 0.5), (size.h - pad * 2) / Math.max(b.maxY - b.minY, 0.5))
-    setView({
+    return {
       k,
       tx: (size.w - (b.maxX - b.minX) * k) / 2 - b.minX * k,
       ty: (size.h - (b.maxY - b.minY) * k) / 2 - b.minY * k,
-    })
+    }
+  }
+
+  /** Whether the view is still the automatic fit (the user hasn't panned or zoomed since). */
+  const autoFit = useRef(true)
+  const fitToContent = (focus?: Vec[]) => {
+    const v = computeFit(focus)
+    if (!v) return
+    setView(v)
+    autoFit.current = !focus
   }
 
   const fitRef = useRef(fitToContent)
@@ -121,8 +140,16 @@ export function PlanCanvas(props: Props) {
   useEffect(() => {
     if (sized) fitRef.current(props.fitRequest.focus)
   }, [props.fitRequest, floor.id, sized, mode])
+  // e.g. the map shrinking while scrolling: stay fitted unless the user has moved the view
+  useEffect(() => {
+    if (autoFit.current) fitRef.current()
+  }, [size.w, size.h])
+
+  const fitted = computeFit()
+  const isFitted = !fitted || (Math.abs(view.k / fitted.k - 1) < 0.01 && Math.abs(view.tx - fitted.tx) < 2 && Math.abs(view.ty - fitted.ty) < 2)
 
   const zoomAt = (sx: number, sy: number, factor: number) => {
+    autoFit.current = false
     setView((v) => {
       const k = Math.min(5000, Math.max(2, v.k * factor))
       const f = k / v.k
@@ -138,6 +165,7 @@ export function PlanCanvas(props: Props) {
       if (e.ctrlKey || e.metaKey) {
         zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-e.deltaY * 0.01))
       } else {
+        autoFit.current = false
         setView((v) => ({ ...v, tx: v.tx - e.deltaX, ty: v.ty - e.deltaY }))
       }
     }
@@ -208,8 +236,8 @@ export function PlanCanvas(props: Props) {
     return best
   }
 
-  const placeCutPoint = (snapped: SnapResult) => {
-    let p = snapped.p
+  const placeCutPoint = (placed: Vec) => {
+    let p = placed
     if (!cut.length) {
       p = ontoWall(p, floor.rooms)
       if (!floor.rooms.some((r) => boundaryParam(r.points, p) !== null)) {
@@ -300,13 +328,33 @@ export function PlanCanvas(props: Props) {
     return { kind, roomId, idx: Number(idx) }
   }
 
+  const relative = (p: Vec): Vec => {
+    const r = svgRef.current!.getBoundingClientRect()
+    return { x: p.x - r.left, y: p.y - r.top }
+  }
+
+  const startPinch = () => {
+    const [a, b] = [...pointers.current.values()]
+    // Whatever the first finger started (a tap, a point being placed) is abandoned.
+    drag.current = { type: 'pinch', d0: Math.max(dist(a, b), 1), m0: relative(mid(a, b)), view }
+    setCursor(null)
+  }
+
   const onPointerDown = (e: ReactPointerEvent<SVGSVGElement>) => {
     const svg = svgRef.current!
+    lastPointerType.current = e.pointerType
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    svg.setPointerCapture(e.pointerId)
+    if (pointers.current.size === 2) {
+      startPinch()
+      return
+    }
+    if (pointers.current.size > 2 || drag.current) return
+
     const world = toWorld(e.clientX, e.clientY)
     const panning = e.button === 1 || (e.button === 0 && spaceDown.current)
     if (panning) {
       drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, view }
-      svg.setPointerCapture(e.pointerId)
       return
     }
     if (e.button !== 0) return
@@ -314,6 +362,7 @@ export function PlanCanvas(props: Props) {
     if (!editing || tool === 'select') {
       const hit = hitOf(e)
       const base = { started: false, sx: e.clientX, sy: e.clientY }
+      if (hit?.kind !== 'vertex') setActiveVertex(null)
       if (editing && hit && hit.roomId === selectedId && selected) {
         if (hit.kind === 'vertex') {
           drag.current = { type: 'vertex', roomId: hit.roomId, idx: hit.idx, ...base }
@@ -329,44 +378,47 @@ export function PlanCanvas(props: Props) {
         } else {
           drag.current = { type: 'room', roomId: hit.roomId, start: world, orig: selected.points, ...base }
         }
-      } else if (hit) {
-        props.onSelect(hit.roomId)
-        if (editing) {
-          const room = floor.rooms.find((r) => r.id === hit.roomId)!
-          drag.current = { type: 'room', roomId: room.id, start: world, orig: room.points, ...base }
-        }
       } else {
-        props.onSelect(null)
-        drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, view }
+        // Dragging pans (so a finger on a room doesn't move it); a tap selects.
+        drag.current = { type: 'pan', sx: e.clientX, sy: e.clientY, view, tap: hit?.roomId ?? null }
       }
-      svg.setPointerCapture(e.pointerId)
       return
     }
 
     const snapped = snapFor(world, e)
+    if (e.pointerType === 'mouse') {
+      place(snapped.p, e)
+    } else {
+      setCursor(snapped)
+      drag.current = { type: 'aim' }
+    }
+  }
+
+  /** Place a point with the current drawing tool. */
+  const place = (p: Vec, e?: ReactPointerEvent) => {
     if (tool === 'polygon') {
-      placePolygonPoint(snapped.p)
+      placePolygonPoint(p)
     } else if (tool === 'rect') {
       if (rectPts.length === 2) {
-        finishRect(rectPreview(snapped.p)!)
+        finishRect(rectPreview(p)!)
       } else if (rectPts.length === 1) {
-        if (dist(rectPts[0], snapped.p) > 1e-6) setRectPts([rectPts[0], snapped.p])
+        if (dist(rectPts[0], p) > 1e-6) setRectPts([rectPts[0], p])
       } else {
-        setRectPts([snapped.p])
-        drag.current = { type: 'rect', sx: e.clientX, sy: e.clientY }
-        svg.setPointerCapture(e.pointerId)
+        setRectPts([p])
+        // with a mouse, the first wall can also be dragged out
+        if (e) drag.current = { type: 'rect', sx: e.clientX, sy: e.clientY }
       }
     } else if (tool === 'calibrate') {
       if (!bd) {
         props.onMessage('Upload a floor plan first.')
       } else if (calibStart) {
-        if (dist(calibStart, snapped.p) > 1e-6) props.onCalibrate(calibStart, snapped.p)
+        if (dist(calibStart, p) > 1e-6) props.onCalibrate(calibStart, p)
         setCalibStart(null)
       } else {
-        setCalibStart(snapped.p)
+        setCalibStart(p)
       }
     } else if (tool === 'split') {
-      placeCutPoint(snapped)
+      placeCutPoint(p)
     }
   }
 
@@ -377,9 +429,32 @@ export function PlanCanvas(props: Props) {
   }
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
+    if (pointers.current.has(e.pointerId)) pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
     const world = toWorld(e.clientX, e.clientY)
     const d = drag.current
+    if (d?.type === 'pinch') {
+      const [a, b] = [...pointers.current.values()]
+      if (!b) return
+      const m = relative(mid(a, b))
+      const k = Math.min(5000, Math.max(2, (d.view.k * dist(a, b)) / d.d0))
+      // keep the world point that was under the fingers' midpoint under it
+      autoFit.current = false
+      setView({
+        k,
+        tx: m.x - ((d.m0.x - d.view.tx) / d.view.k) * k,
+        ty: m.y - ((d.m0.y - d.view.ty) / d.view.k) * k,
+      })
+      return
+    }
+    if (d?.type === 'idle') return
+    if (d?.type === 'aim') {
+      setCursor(snapFor(world, e))
+      return
+    }
     if (d?.type === 'pan') {
+      if (!d.moved && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < DRAG_THRESHOLD) return
+      d.moved = true
+      autoFit.current = false
       setView({ ...d.view, tx: d.view.tx + e.clientX - d.sx, ty: d.view.ty + e.clientY - d.sy })
       return
     }
@@ -419,6 +494,7 @@ export function PlanCanvas(props: Props) {
       setRoomPoints(d.roomId, d.orig.map((p) => add(p, delta)))
       return
     }
+    if (e.pointerType !== 'mouse') return
     if (editing && tool !== 'select') setCursor(snapFor(world, e))
     else if (cursor) setCursor(null)
     if (!editing || tool === 'select') {
@@ -428,28 +504,50 @@ export function PlanCanvas(props: Props) {
   }
 
   const onPointerUp = (e: ReactPointerEvent<SVGSVGElement>) => {
-    const d = drag.current
-    drag.current = null
+    pointers.current.delete(e.pointerId)
     if (svgRef.current!.hasPointerCapture(e.pointerId)) svgRef.current!.releasePointerCapture(e.pointerId)
+    const d = drag.current
+    if (d?.type === 'pinch' || d?.type === 'idle') {
+      drag.current = pointers.current.size ? { type: 'idle' } : null
+      return
+    }
+    drag.current = null
+    if (d?.type === 'pan' && !d.moved && d.tap !== undefined) props.onSelect(d.tap)
+    if (d?.type === 'aim') {
+      setCursor(null)
+      place(snapFor(toWorld(e.clientX, e.clientY), e).p)
+    }
+    if (d?.type === 'vertex' && !d.started) setActiveVertex(d.idx)
     if (d?.type === 'vertex' || d?.type === 'edge') setCursor(null)
     if (d?.type === 'rect' && rectPts.length === 1 && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > DRAG_THRESHOLD) {
       setRectPts([rectPts[0], snapFor(toWorld(e.clientX, e.clientY), e).p])
     }
   }
 
+  const onPointerCancel = (e: ReactPointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId)
+    drag.current = pointers.current.size ? { type: 'idle' } : null
+    setCursor(null)
+  }
+
+  const removeVertex = (idx: number) => {
+    if (!selected || selected.points.length <= 3) return
+    props.commit((f) => ({
+      ...f,
+      rooms: f.rooms.map((r) => (r.id === selected.id ? { ...r, points: r.points.filter((_, i) => i !== idx) } : r)),
+    }))
+    setActiveVertex(null)
+  }
+
   const onDoubleClick = (e: ReactMouseEvent<SVGSVGElement>) => {
-    if (!editing) return
+    // double taps are too easily triggered while placing points with a finger
+    if (!editing || lastPointerType.current !== 'mouse') return
     if (tool === 'polygon') {
       finishPolygon()
       return
     }
     const hit = hitOf(e)
-    if (tool === 'select' && hit?.kind === 'vertex' && selected && selected.points.length > 3) {
-      props.commit((f) => ({
-        ...f,
-        rooms: f.rooms.map((r) => (r.id === selected.id ? { ...r, points: r.points.filter((_, i) => i !== hit.idx) } : r)),
-      }))
-    }
+    if (tool === 'select' && hit?.kind === 'vertex') removeVertex(hit.idx)
   }
 
   // ---------- keyboard ----------
@@ -536,20 +634,25 @@ export function PlanCanvas(props: Props) {
     const isHover = hover?.endsWith(room.id)
     const lp = labelPoint(room.points)
     const open = props.openTodoCount(room)
+    // the small map outside the editor has no room for labels of small rooms
+    const rb = bounds(room.points)
+    const showName = editing || ((rb.maxX - rb.minX) * k > room.name.length * 7 + 8 && (rb.maxY - rb.minY) * k > 40)
+    const badgeY = showName ? lp.y + px(14) : lp.y
     return (
       <g key={room.id}>
         <polygon
           data-hit={`room:${room.id}`}
           points={room.points.map((p) => `${p.x},${p.y}`).join(' ')}
           fill={room.color}
-          fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.8 : isHover ? 0.7 : 0.55}
-          stroke={isSel ? '#2563eb' : '#44403c'}
-          strokeWidth={isSel ? 2.5 : editing ? 1.25 : 2}
+          // outside the editor, rooms with open TODOs stand out as hot spots
+          fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.85 : (open ? 0.6 : 0.2) + (isHover ? 0.15 : 0)}
+          stroke={isSel ? '#2563eb' : editing ? '#44403c' : '#78716c'}
+          strokeWidth={isSel ? 2.5 : editing ? 1.25 : 1.5}
           strokeLinejoin="round"
           vectorEffect="non-scaling-stroke"
           className={drawing ? 'pointer-events-none' : 'cursor-pointer'}
         />
-        <text
+        {showName && <text
           x={lp.x}
           y={lp.y}
           fontSize={px(13)}
@@ -558,10 +661,23 @@ export function PlanCanvas(props: Props) {
           style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: px(3), strokeOpacity: 0.8 }}
         >
           {room.name}
-          <tspan x={lp.x} dy={px(15)} fontSize={px(11)} className="fill-stone-600 font-normal">
-            {editing ? fmtArea(area(room.points)) : open ? `${open} open TODO${open > 1 ? 's' : ''}` : ''}
-          </tspan>
-        </text>
+          {editing && (
+            <tspan x={lp.x} dy={px(15)} fontSize={px(11)} className="fill-stone-600 font-normal">
+              {fmtArea(area(room.points))}
+            </tspan>
+          )}
+        </text>}
+        {!editing && open > 0 && (
+          <g className="pointer-events-none">
+            <circle cx={lp.x} cy={badgeY} r={px(9)} className="fill-amber-500" />
+            <text
+              x={lp.x} y={badgeY} fontSize={px(11)} textAnchor="middle" dominantBaseline="central"
+              className="select-none fill-white font-semibold"
+            >
+              {open}
+            </text>
+          </g>
+        )}
       </g>
     )
   })
@@ -586,7 +702,7 @@ export function PlanCanvas(props: Props) {
               <line
                 data-hit={`edge:${selected.id}:${i}`}
                 x1={a.x} y1={a.y} x2={b.x} y2={b.y}
-                stroke="transparent" strokeWidth={12} vectorEffect="non-scaling-stroke"
+                stroke="transparent" strokeWidth={18} vectorEffect="non-scaling-stroke"
                 style={{ cursor: Math.abs(e1.x) > Math.abs(e1.y) ? 'ns-resize' : 'ew-resize' }}
               />
               <text
@@ -596,23 +712,26 @@ export function PlanCanvas(props: Props) {
               >
                 {fmtLen(l)}
               </text>
-              <circle
-                data-hit={`mid:${selected.id}:${i}`}
-                cx={m.x} cy={m.y} r={px(4)}
-                className="fill-white stroke-blue-500 opacity-60 hover:opacity-100 cursor-copy"
-                strokeWidth={1.5} vectorEffect="non-scaling-stroke"
-              />
+              <g data-hit={`mid:${selected.id}:${i}`} className="group cursor-copy">
+                <circle cx={m.x} cy={m.y} r={px(12)} fill="transparent" />
+                <circle
+                  cx={m.x} cy={m.y} r={px(4.5)}
+                  className="fill-white stroke-blue-500 opacity-60 group-hover:opacity-100"
+                  strokeWidth={1.5} vectorEffect="non-scaling-stroke"
+                />
+              </g>
             </g>
           )
         })}
         {pts.map((p, i) => (
-          <circle
-            key={`v${i}`}
-            data-hit={`vertex:${selected.id}:${i}`}
-            cx={p.x} cy={p.y} r={px(6)}
-            className="fill-white stroke-blue-600 cursor-move"
-            strokeWidth={2} vectorEffect="non-scaling-stroke"
-          />
+          <g key={`v${i}`} data-hit={`vertex:${selected.id}:${i}`} className="cursor-move">
+            <circle cx={p.x} cy={p.y} r={px(16)} fill="transparent" />
+            <circle
+              cx={p.x} cy={p.y} r={px(i === activeVertex ? 8 : 6)}
+              className={i === activeVertex ? 'fill-blue-600 stroke-white' : 'fill-white stroke-blue-600'}
+              strokeWidth={2} vectorEffect="non-scaling-stroke"
+            />
+          </g>
         ))}
       </g>
     )
@@ -718,6 +837,24 @@ export function PlanCanvas(props: Props) {
 
   const svgCursor = drag.current?.type === 'pan' ? 'grabbing' : drawing ? 'crosshair' : 'default'
 
+  // On-screen versions of the keyboard/double-click actions, needed on touch devices.
+  const actions: { label: string; onClick: () => void; primary?: boolean; disabled?: boolean }[] = []
+  if (drawing && tool === 'polygon' && draft.length) {
+    actions.push(
+      { label: 'Undo point', onClick: () => setDraft((d) => d.slice(0, -1)) },
+      { label: 'Finish room', onClick: finishPolygon, primary: true, disabled: draft.length < 3 },
+      { label: 'Cancel', onClick: () => setDraft([]) },
+    )
+  } else if (drawing && tool === 'split' && cut.length) {
+    actions.push({ label: 'Undo point', onClick: () => setCut((c) => c.slice(0, -1)) }, { label: 'Cancel', onClick: () => setCut([]) })
+  } else if (drawing && tool === 'rect' && rectPts.length) {
+    actions.push({ label: 'Cancel', onClick: () => setRectPts([]) })
+  } else if (drawing && tool === 'calibrate' && calibStart) {
+    actions.push({ label: 'Cancel', onClick: () => setCalibStart(null) })
+  } else if (showHandles && activeVertex !== null && selected && selected.points.length > 3) {
+    actions.push({ label: 'Remove corner', onClick: () => removeVertex(activeVertex) })
+  }
+
   return (
     <div className="relative h-full w-full overflow-hidden bg-[radial-gradient(circle,#d6d3d1_1px,transparent_1px)] [background-size:20px_20px]">
       <svg
@@ -727,6 +864,7 @@ export function PlanCanvas(props: Props) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onPointerLeave={() => !drag.current && setCursor(null)}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
@@ -749,12 +887,34 @@ export function PlanCanvas(props: Props) {
         </g>
       </svg>
 
-      <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
-        <ZoomButton label="+" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)} />
-        <ZoomButton label="−" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)} />
-        <ZoomButton label="⤢" title="Fit to content" onClick={() => fitToContent()} />
-      </div>
-      <ScaleBar k={k} />
+      {actions.length > 0 && (
+        <div className="absolute inset-x-0 bottom-14 flex justify-center px-3">
+          <div className="flex gap-1 rounded-xl border border-stone-300 bg-white p-1 shadow-md">
+            {actions.map((a) => (
+              <button
+                key={a.label}
+                onClick={a.onClick}
+                disabled={a.disabled}
+                className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40 ${a.primary ? 'bg-blue-600 text-white' : 'text-stone-700 hover:bg-stone-100'}`}
+              >
+                {a.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+      {(editing || !isFitted) && (
+        <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-stone-300 bg-white shadow-sm">
+          {editing && (
+            <>
+              <ZoomButton label="+" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)} />
+              <ZoomButton label="−" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)} />
+            </>
+          )}
+          {!isFitted && <ZoomButton label="⤢" title="Fit to content" onClick={() => fitToContent()} />}
+        </div>
+      )}
+      {editing && <ScaleBar k={k} />}
     </div>
   )
 }
@@ -803,7 +963,7 @@ function ZoomButton({ label, title, onClick }: { label: string; title?: string; 
     <button
       title={title}
       onClick={onClick}
-      className="h-8 w-8 border-b border-stone-200 text-stone-600 last:border-b-0 hover:bg-stone-100"
+      className="h-9 w-9 border-b border-stone-200 text-stone-600 last:border-b-0 hover:bg-stone-100"
     >
       {label}
     </button>

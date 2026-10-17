@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { dist } from '../lib/geometry'
 import type { Vec } from '../model/types'
-import { Button } from './ui'
+import { Button, inputClass } from './ui'
 
 /** Parse "3.5", "3,5 m", "350cm", "3500 mm" into meters. */
 export function parseLength(s: string): number | null {
@@ -33,13 +33,13 @@ export function CalibrateDialog({
   const canStraighten = Math.abs(turnDeg) > 0.05
   const [straighten, setStraighten] = useState(canStraighten)
   return (
-    <div className="absolute inset-x-0 bottom-16 flex justify-center">
+    <div className="absolute inset-x-0 bottom-0 z-10 flex justify-center p-2">
       <form
         onSubmit={(e) => {
           e.preventDefault()
           if (parsed) onApply(parsed, straighten && canStraighten)
         }}
-        className="w-80 rounded-xl border border-stone-300 bg-white p-4 shadow-lg"
+        className="w-full max-w-sm rounded-xl border border-stone-300 bg-white p-4 shadow-lg"
       >
         <h3 className="font-semibold">How long is this line in reality?</h3>
         <p className="mt-1 text-xs text-stone-500">
@@ -51,8 +51,9 @@ export function CalibrateDialog({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === 'Escape' && onCancel()}
-          placeholder="e.g. 4.25 m or 425 cm"
-          className="mt-3 w-full rounded-md border border-stone-300 px-2 py-1.5 focus:border-blue-500 focus:outline-none"
+          placeholder="Length in meters, e.g. 4.25"
+          inputMode="decimal"
+          className={`${inputClass} mt-3 w-full`}
         />
         {canStraighten && (
           <label className="mt-3 flex items-start gap-2 text-sm text-stone-700">

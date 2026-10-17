@@ -2,19 +2,39 @@ import type { Tool } from '../editor/PlanCanvas'
 import { Kbd } from './ui'
 
 export const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
-  { id: 'select', label: 'Select & edit', key: 'V', icon: '↖' },
+  { id: 'select', label: 'Select', key: 'V', icon: '↖\uFE0E' },
   { id: 'rect', label: 'Rectangle', key: 'R', icon: '▭' },
   { id: 'polygon', label: 'Polygon', key: 'P', icon: '⬠' },
-  { id: 'split', label: 'Split', key: 'X', icon: '✂' },
-  { id: 'calibrate', label: 'Set scale', key: 'S', icon: '↔' },
+  { id: 'split', label: 'Split', key: 'X', icon: '✂\uFE0E' },
+  { id: 'calibrate', label: 'Scale', key: 'S', icon: '↔\uFE0E' },
 ]
 
-const HINTS: Record<Tool, string[]> = {
-  select: ['Click a room to select', 'Drag corners, walls or the whole room', 'Click ◦ on a wall to add a corner', 'Double-click a corner to remove it', 'Del removes the room'],
-  rect: ['Draw one wall (drag, or click both ends)', 'then click to set the depth'],
-  polygon: ['Click to add corners', 'Type a number + ⏎ for an exact wall length', 'Click the first corner or ⏎ to finish', '⌫ removes last corner'],
-  split: ['Click a wall to start the cut', 'click inside for bends', 'click the opposite wall to split the room', '⌫ removes last point'],
-  calibrate: ['Click both ends of a dimension you know (e.g. a labelled wall)', 'Optionally straighten the plan along it'],
+const HINTS: Record<Tool, string> = {
+  select: 'Select a room to edit it: drag its corners or walls, ◦ on a wall adds a corner',
+  rect: 'Place both ends of one wall, then set the depth',
+  polygon: 'Place the corners, then close on the first corner or use Finish',
+  split: 'Start on a wall, add bends inside the room, end on the opposite wall',
+  calibrate: 'Place both ends of a dimension you know, e.g. a labelled wall',
+}
+
+const KEY_HINTS: Partial<Record<Tool, string>> = {
+  select: 'Double-click a corner to remove it · Del removes the room',
+  polygon: 'Type a number + ⏎ for an exact wall length · ⌫ removes the last corner',
+  split: '⌫ removes the last point',
+}
+
+export function ToolHint({ tool }: { tool: Tool }) {
+  return (
+    <div className="max-w-md rounded-lg bg-stone-900/80 px-3 py-1.5 text-center text-xs text-stone-100">
+      {HINTS[tool]}
+      {/* keyboard and mouse extras only matter with a mouse */}
+      <span className="hidden pointer-fine:block mt-0.5 text-stone-300">
+        {KEY_HINTS[tool] && <>{KEY_HINTS[tool]} · </>}
+        {tool !== 'select' && <><Kbd>Shift</Kbd> angle snapping · <Kbd>Alt</Kbd> no snapping · </>}
+        <Kbd>Space</Kbd>+drag pan · <Kbd>Ctrl</Kbd>+scroll zoom
+      </span>
+    </div>
+  )
 }
 
 export function Toolbar({
@@ -27,37 +47,27 @@ export function Toolbar({
   undo: () => void
   redo: () => void
 }) {
+  const btn = 'flex min-w-0 flex-1 md:max-w-24 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] font-medium'
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-3 flex flex-col items-center gap-2">
-      <div className="pointer-events-auto flex items-center gap-0.5 rounded-xl border border-stone-300 bg-white p-1 shadow-sm">
-        {TOOLS.map((t) => (
-          <button
-            key={t.id}
-            title={`${t.label} (${t.key})`}
-            onClick={() => setTool(t.id)}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm ${
-              tool === t.id ? 'bg-blue-600 text-white' : 'text-stone-700 hover:bg-stone-100'
-            }`}
-          >
-            <span className="w-4 text-center">{t.icon}</span>
-            <span className="hidden lg:inline">{t.label}</span>
-          </button>
-        ))}
-        <div className="mx-1 h-6 w-px bg-stone-200" />
-        <button title="Undo (Ctrl/⌘+Z)" disabled={!canUndo} onClick={undo} className="rounded-lg px-2 py-1.5 text-stone-700 hover:bg-stone-100 disabled:opacity-30">↶</button>
-        <button title="Redo (Ctrl/⌘+Shift+Z)" disabled={!canRedo} onClick={redo} className="rounded-lg px-2 py-1.5 text-stone-700 hover:bg-stone-100 disabled:opacity-30">↷</button>
-      </div>
-      <div className="flex max-w-[90%] flex-wrap justify-center gap-x-3 gap-y-1 rounded-lg bg-stone-900/75 px-3 py-1 text-xs text-stone-100">
-        {HINTS[tool].map((h) => <span key={h}>{h}</span>)}
-        {tool !== 'select' && (
-          <span className="text-stone-300">
-            <Kbd>Shift</Kbd> toggle angle snapping · <Kbd>Alt</Kbd> no snapping
-          </span>
-        )}
-        <span className="text-stone-300">
-          <Kbd>Space</Kbd>+drag pan · <Kbd>Ctrl</Kbd>+scroll zoom
-        </span>
-      </div>
-    </div>
+    <nav className="flex shrink-0 items-stretch justify-center gap-0.5 border-t border-stone-200 bg-white px-1 pt-1 pb-[max(env(safe-area-inset-bottom),0.25rem)]">
+      {TOOLS.map((t) => (
+        <button
+          key={t.id}
+          title={`${t.label} (${t.key})`}
+          onClick={() => setTool(t.id)}
+          className={`${btn} ${tool === t.id ? 'bg-blue-600 text-white' : 'text-stone-600 hover:bg-stone-100'}`}
+        >
+          <span className="text-lg leading-6">{t.icon}</span>
+          {t.label}
+        </button>
+      ))}
+      <div className="mx-0.5 my-2 w-px bg-stone-200" />
+      <button title="Undo (Ctrl/⌘+Z)" disabled={!canUndo} onClick={undo} className={`${btn} text-stone-600 hover:bg-stone-100 disabled:opacity-30`}>
+        <span className="text-lg leading-6">↶</span>Undo
+      </button>
+      <button title="Redo (Ctrl/⌘+Shift+Z)" disabled={!canRedo} onClick={redo} className={`${btn} text-stone-600 hover:bg-stone-100 disabled:opacity-30`}>
+        <span className="text-lg leading-6">↷</span>Redo
+      </button>
+    </nav>
   )
 }
