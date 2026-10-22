@@ -28,7 +28,21 @@ function wallOutline(rooms: Room[], t: number): MultiPolygon {
     })
   }
   if (!boxes.length) return []
-  return polygonClipping.union(boxes[0], ...boxes.slice(1))
+  try {
+    return polygonClipping.union(boxes[0], ...boxes.slice(1))
+  } catch {
+    // polygon-clipping can choke on near-degenerate input; merge what we can and keep the rest as separate boxes
+    let acc: MultiPolygon = []
+    const rest: MultiPolygon = []
+    for (const box of boxes) {
+      try {
+        acc = acc.length ? polygonClipping.union(acc, box) : [box]
+      } catch {
+        rest.push(box)
+      }
+    }
+    return [...acc, ...rest]
+  }
 }
 
 const ringPoints = (ring: Pair[]) => ring.slice(0, -1).map(([x, y]) => new THREE.Vector2(x, y))
