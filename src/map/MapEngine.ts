@@ -506,6 +506,7 @@ export class MapEngine {
     const { w, h } = this.size
     const q = new THREE.Vector3()
     const MARGIN = 4
+    const edge = this.data?.settings.floatLabels ?? false
     const project = (v: THREE.Vector3): Pt => {
       q.copy(v).project(this.camera)
       return { x: ((q.x + 1) / 2) * w, y: ((1 - q.y) / 2) * h }
@@ -521,13 +522,15 @@ export class MapEngine {
       const rw = Math.max(...xs) - Math.min(...xs)
       const rh = Math.max(...ys) - Math.min(...ys)
       const a = project(l.anchor)
-      const fits = rw > l.w + 8 && rh > l.h + 4
+      const fits = !edge && rw > l.w + 8 && rh > l.h + 4
       return { l, poly, a, fits, pos: a }
     })
 
     const polys = items.map((i) => i.poly)
     const boxOf = (p: Pt, l: Label): Rect => ({ x0: p.x - l.w / 2, y0: p.y - l.h / 2, x1: p.x + l.w / 2, y1: p.y + l.h / 2 })
     const taken: Rect[] = items.filter((i) => i.fits).map((i) => boxOf(i.a, i.l))
+    // keep clear of the map controls in the bottom right corner
+    taken.push({ x0: w - 56, y0: h - 100, x1: w, y1: h })
 
     // direction "away from the building", measured from the centre of everything on screen
     const all = polys.flat()
@@ -541,6 +544,24 @@ export class MapEngine {
     const STEP = Math.PI / 12
     for (const it of floating) {
       const { l, a } = it
+      if (edge) {
+        // every spot along the screen border; the nearest free one wins, covering a room is costly
+        const cands: Pt[] = []
+        const x0 = MARGIN + l.w / 2, x1 = w - MARGIN - l.w / 2, y0 = MARGIN + l.h / 2, y1 = h - MARGIN - l.h / 2
+        for (let x = x0; x <= x1; x += 10) cands.push({ x, y: y0 }, { x, y: y1 })
+        for (let y = y0; y <= y1; y += 10) cands.push({ x: x0, y }, { x: x1, y })
+        let best: Pt | null = null
+        let bestCost = Infinity
+        for (const p of cands) {
+          const r = boxOf(p, l)
+          if (taken.some((t) => rectsOverlap(r, t, 3))) continue
+          const cost = Math.hypot(p.x - a.x, p.y - a.y) + (polys.some((poly) => rectHitsPoly(r, poly)) ? 400 : 0)
+          if (cost < bestCost) { bestCost = cost; best = p }
+        }
+        it.pos = best ?? a
+        taken.push(boxOf(it.pos, l))
+        continue
+      }
       const base = Math.hypot(a.x - cx, a.y - cy) > 1 ? Math.atan2(a.y - cy, a.x - cx) : -Math.PI / 2
       // candidates ordered by cost: a short leader and little deviation from "straight outward"
       const cands: { p: Pt; cost: number }[] = []
