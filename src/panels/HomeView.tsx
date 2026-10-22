@@ -10,7 +10,7 @@ import { Button, FloorTabs, Menu } from './ui'
 const openTodoCount = (r: Room) => openTodos(r).length
 
 /** The progress of a map that is always fully shown (the side-by-side layout). */
-const fullyScrolled: ScrollProgress = { value: 1, subscribe: () => () => {} }
+const fullyScrolled: ScrollProgress = { value: 1, heightAt: () => undefined, subscribe: () => () => {} }
 
 /** The everyday view: room contents first, with the plan as a map for orientation. */
 export function HomeView({
@@ -149,7 +149,10 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: Scr
     if (mapRef.current) mapRef.current.style.height = `${Math.max(min, max - top)}px`
     progress.set(max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1)
   }
-  useLayoutEffect(resize, [max, min, !!map])
+  useLayoutEffect(() => {
+    progress.setRange(max, min)
+    resize()
+  }, [max, min, !!map])
 
   // Opening a room while the map is collapsed shows the room from its top.
   useEffect(() => {

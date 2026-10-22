@@ -28,7 +28,6 @@ export function PlanMap3D({
   const openCounts = Object.fromEntries(floor.rooms.map((r) => [r.id, openTodoCount(r)]))
   const countsKey = JSON.stringify(openCounts)
   const { fixPitch, fixedPitch, pitchMin, pitchMax } = settings
-  const pitchAt = (p: number) => (fixPitch ? fixedPitch : pitchMin + (pitchMax - pitchMin) * p)
 
   useLayoutEffect(() => {
     const engine = new MapEngine(hostRef.current!, labelsRef.current!, {
@@ -44,10 +43,13 @@ export function PlanMap3D({
 
   // the scroll position goes straight to the engine, without a React render per scroll event
   useLayoutEffect(() => {
-    const apply = () => engineRef.current!.setPitch(pitchAt(scroll.value))
-    apply()
-    return scroll.subscribe(apply)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const engine = engineRef.current!
+    engine.setScrollModel({
+      pitchAt: (t) => (fixPitch ? fixedPitch : pitchMin + (pitchMax - pitchMin) * t),
+      heightAt: scroll.heightAt,
+    })
+    engine.setScroll(scroll.value)
+    return scroll.subscribe(() => engine.setScroll(scroll.value))
   }, [scroll, fixPitch, fixedPitch, pitchMin, pitchMax])
 
   useLayoutEffect(() => {

@@ -18,6 +18,21 @@ export interface ViewState {
   fitted: boolean
 }
 
+/** How the page scroll maps to the camera, so label layouts can be solved ahead of time. */
+interface ScrollModel {
+  /** camera tilt in degrees for a scroll progress from 0 to 1 */
+  pitchAt: (t: number) => number
+  /** height of the map in px at a scroll progress; undefined when the map does not scroll */
+  heightAt: (t: number) => number | undefined
+}
+
+/** A label layout, solved for one scroll progress: where each label sits relative to its anchor. */
+interface Keyframes {
+  key: string
+  frames: { off: Pt; floating: boolean }[][]
+}
+const KEYFRAMES = 5
+
 interface Callbacks {
   onSelect: (roomId: string | null) => void
   onView: (v: ViewState) => void
@@ -86,6 +101,7 @@ const TAP_SLOP = 6
 const WARM_WHITE = new THREE.Color('#faf7f2')
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+const pitchRad = (deg: number) => clamp(deg * RAD, 0.05, 1.45)
 
 /**
  * Renders the floor as a small 3D model (floor slabs, thick walls, sun and shadows) and handles
@@ -113,6 +129,10 @@ export class MapEngine {
   private bbox = { minX: 0, maxX: 1, minZ: 0, maxZ: 1 }
   private size = { w: 0, h: 0 }
   private raf = 0
+  private scrollModel: ScrollModel | null = null
+  private scrollT = 0
+  private keyframes: Keyframes | null = null
+  private proj = new THREE.Vector3()
   private sunKey = ''
   private lastView: ViewState | null = null
   private ro: ResizeObserver
@@ -179,11 +199,25 @@ export class MapEngine {
 
   /** Camera tilt in degrees from straight down. */
   setPitch(deg: number) {
-    const p = clamp(deg * RAD, 0.05, 1.45)
+    const p = pitchRad(deg)
     if (p === this.pitch) return
     this.pitch = p
     if (this.autoFit) this.fit()
     else this.apply()
+    this.requestRender()
+  }
+
+  /** Tells the engine how scrolling maps to tilt and map height. */
+  setScrollModel(model: ScrollModel) {
+    this.scrollModel = model
+    this.keyframes = null
+    this.setScroll(this.scrollT)
+  }
+
+  /** The scroll progress, from 0 (page at its top) to 1 (map fully collapsed). */
+  setScroll(t: number) {
+    this.scrollT = t
+    if (this.scrollModel) this.setPitch(this.scrollModel.pitchAt(t))
     this.requestRender()
   }
 
@@ -201,7 +235,8 @@ export class MapEngine {
     this.requestRender()
   }
 
-  fit() {
+  /** `commit` false only computes the fitted camera, without notifying or drawing (see `solveKeyframes`). */
+  fit(commit = true) {
     const d = this.data
     if (!d || !this.size.w) return
     const { minX, maxX, minZ, maxZ } = this.bbox
@@ -221,8 +256,8 @@ export class MapEngine {
     }
     this.dist = this.fitDist = dist
     this.autoFit = true
-    this.apply()
-    this.requestRender()
+    this.apply(commit)
+    if (commit) this.requestRender()
   }
 
   resetRotation() {
@@ -247,6 +282,7 @@ export class MapEngine {
     this.labelHost.append(this.leaders)
     this.roomMeshes = []
     this.labels = []
+    this.keyframes = null
   }
 
   private rebuild() {
@@ -529,19 +565,75 @@ export class MapEngine {
     this.placeLabels()
   }
 
+  private project(v: THREE.Vector3): Pt {
+    this.proj.copy(v).project(this.camera)
+    return { x: ((this.proj.x + 1) / 2) * this.size.w, y: ((1 - this.proj.y) / 2) * this.size.h }
+  }
+
+  /**
+   * While the map is auto-fitted, its camera depends on the scroll position alone, so the label layout
+   * is solved for a few scroll positions and interpolated in between: labels glide instead of
+   * re-arranging with every scroll event. Once the user pans, zooms or rotates, the layout is solved live.
+   */
+  private placeLabels() {
+    const model = this.scrollModel
+    const h0 = model?.heightAt(0), h1 = model?.heightAt(1)
+    if (!model || !this.autoFit || h0 === undefined || h1 === undefined || !this.size.w) {
+      for (const r of this.layoutLabels()) this.paintLabel(r.l, r.a, r.pos, r.floating ? 1 : 0)
+      return
+    }
+    const key = [this.size.w, h0, h1, this.yaw, model.pitchAt(0), model.pitchAt(1)].join()
+    if (this.keyframes?.key !== key) this.keyframes = this.solveKeyframes(model, key)
+    const kf = this.keyframes
+    if (!kf) return
+    const x = clamp(this.scrollT, 0, 1) * (KEYFRAMES - 1)
+    const k = Math.min(Math.floor(x), KEYFRAMES - 2)
+    const f = x - k
+    this.labels.forEach((l, i) => {
+      const A = kf.frames[k][i], B = kf.frames[k + 1][i]
+      const a = this.project(l.anchor)
+      const pos = { x: a.x + A.off.x + (B.off.x - A.off.x) * f, y: a.y + A.off.y + (B.off.y - A.off.y) * f }
+      this.paintLabel(l, a, pos, (A.floating ? 1 - f : 0) + (B.floating ? f : 0))
+    })
+  }
+
+  /** Lays the labels out as if the page were scrolled to each of the keyframe positions. */
+  private solveKeyframes(model: ScrollModel, key: string): Keyframes {
+    const saved = {
+      size: this.size, pitch: this.pitch, target: this.target.clone(), dist: this.dist, fitDist: this.fitDist, autoFit: this.autoFit,
+    }
+    const frames: Keyframes['frames'] = []
+    for (let k = 0; k < KEYFRAMES; k++) {
+      const t = k / (KEYFRAMES - 1)
+      this.size = { w: saved.size.w, h: model.heightAt(t)! }
+      this.camera.aspect = this.size.w / this.size.h
+      this.camera.updateProjectionMatrix()
+      this.pitch = pitchRad(model.pitchAt(t))
+      this.fit(false)
+      frames.push(this.layoutLabels().map((r) => ({ off: { x: r.pos.x - r.a.x, y: r.pos.y - r.a.y }, floating: r.floating })))
+    }
+    this.size = saved.size
+    this.camera.aspect = this.size.w / this.size.h
+    this.camera.updateProjectionMatrix()
+    this.pitch = saved.pitch
+    this.target.copy(saved.target)
+    this.dist = saved.dist
+    this.fitDist = saved.fitDist
+    this.autoFit = saved.autoFit
+    this.apply(false)
+    return { key, frames }
+  }
+
   /**
    * Labels that fit inside their room stay there. The others float: they are moved just outside
    * the building (or into any free spot) and tied to their room by a leader line and dot.
+   * Returns where each label goes, for the camera as it is now.
    */
-  private placeLabels() {
+  private layoutLabels() {
     const { w, h } = this.size
-    const q = new THREE.Vector3()
     const MARGIN = 4
     const edge = this.data?.settings.floatLabels ?? false
-    const project = (v: THREE.Vector3): Pt => {
-      q.copy(v).project(this.camera)
-      return { x: ((q.x + 1) / 2) * w, y: ((1 - q.y) / 2) * h }
-    }
+    const project = (v: THREE.Vector3) => this.project(v)
 
     const items = this.labels.map((l) => {
       if (!l.w) {
@@ -722,20 +814,23 @@ export class MapEngine {
       }, null, 1)
     }
 
-    for (const it of items) {
-      const { l, a, pos } = it
-      l.el.style.transform = `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`
-      l.leader.style.display = it.fits ? 'none' : ''
-      if (it.fits) continue
-      // leader ends where the line from the anchor meets the pill's edge
-      const dx = pos.x - a.x, dy = pos.y - a.y
-      const t = Math.min(dx ? l.w / 2 / Math.abs(dx) : Infinity, dy ? l.h / 2 / Math.abs(dy) : Infinity, 1)
-      const ex = pos.x - dx * t, ey = pos.y - dy * t
-      for (const ln of l.line) {
-        ln.setAttribute('x1', String(a.x)); ln.setAttribute('y1', String(a.y))
-        ln.setAttribute('x2', String(ex)); ln.setAttribute('y2', String(ey))
-      }
-      l.dot.setAttribute('cx', String(a.x)); l.dot.setAttribute('cy', String(a.y))
+    return items.map((it) => ({ l: it.l, a: it.a, pos: it.pos, floating: !it.fits }))
+  }
+
+  /** `floating`: 0 for a label inside its room, 1 for one tied to it by a leader line (in between while fading). */
+  private paintLabel(l: Label, a: Pt, pos: Pt, floating: number) {
+    l.el.style.transform = `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`
+    l.leader.style.display = floating < 0.01 ? 'none' : ''
+    if (floating < 0.01) return
+    l.leader.style.opacity = String(floating)
+    // leader ends where the line from the anchor meets the pill's edge
+    const dx = pos.x - a.x, dy = pos.y - a.y
+    const t = Math.min(dx ? l.w / 2 / Math.abs(dx) : Infinity, dy ? l.h / 2 / Math.abs(dy) : Infinity, 1)
+    const ex = pos.x - dx * t, ey = pos.y - dy * t
+    for (const ln of l.line) {
+      ln.setAttribute('x1', String(a.x)); ln.setAttribute('y1', String(a.y))
+      ln.setAttribute('x2', String(ex)); ln.setAttribute('y2', String(ey))
     }
+    l.dot.setAttribute('cx', String(a.x)); l.dot.setAttribute('cy', String(a.y))
   }
 }
