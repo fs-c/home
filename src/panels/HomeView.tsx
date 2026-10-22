@@ -1,16 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { PlanCanvas } from '../editor/PlanCanvas'
+import { MapSettingsPanel } from '../map/MapSettingsPanel'
+import { PlanMap3D } from '../map/PlanMap3D'
+import { useMapSettings } from '../map/settings'
 import type { Floor, HomeDoc, Item, Room } from '../model/types'
 import { AddItemBar, Overview, RoomDetail, openTodos } from './RoomContent'
 import { Button, FloorTabs, Menu } from './ui'
 
-const NO_FIT = { n: 0 }
-const SNAP = { enabled: false, angles: false }
-const noop = () => {}
 const openTodoCount = (r: Room) => openTodos(r).length
-/** Camera tilt of the map: nearly top-down at rest, leaning back as the content scrolls over it. */
-const PITCH_MIN = (20 * Math.PI) / 180
-const PITCH_MAX = (55 * Math.PI) / 180
 
 /** The everyday view: room contents first, with the plan as a map for orientation. */
 export function HomeView({
@@ -27,6 +23,8 @@ export function HomeView({
   menu: { label: string; onClick: () => void }[]
 }) {
   const [showPlan, setShowPlan] = useState(false)
+  const [mapSettings, setMapSettings] = useMapSettings()
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const wide = useMediaQuery('(min-width: 768px)')
   const selected = floor.rooms.find((r) => r.id === selectedId) ?? null
   const hasRooms = floor.rooms.length > 0
@@ -34,26 +32,18 @@ export function HomeView({
   const toggle = (room: Room, item: Item) =>
     changeRoom(room.id, (r) => ({ ...r, items: r.items.map((i) => (i.id === item.id ? { ...i, done: !i.done } : i)) }))
 
-  const map = hasRooms && ((pitch: number) => (
+  /** `scroll`: how far the page is scrolled over the map, from 0 to 1. */
+  const map = hasRooms && ((scroll: number) => (
     <div className="relative h-full">
-      <PlanCanvas
-        pitch={pitch}
+      <PlanMap3D
         floor={floor}
         imageUrl={imageUrl}
-        mode="home"
-        tool="select"
+        showBackdrop={showPlan}
         selectedId={selectedId}
         onSelect={onSelect}
-        snap={SNAP}
-        showBackdrop={showPlan}
-        fitRequest={NO_FIT}
-        pendingCalibration={null}
-        onCalibrate={noop}
-        onMessage={noop}
-        commit={noop}
-        replace={noop}
-        checkpoint={noop}
         openTodoCount={openTodoCount}
+        settings={mapSettings}
+        scroll={scroll}
       />
       {floor.backdrop && (
         <button
@@ -107,13 +97,13 @@ export function HomeView({
         <h1 className="shrink-0 truncate font-semibold">{doc.name}</h1>
         {doc.floors.length > 1 && <FloorTabs floors={doc.floors} current={floor.id} onSelect={onSelectFloor} />}
         <div className="ml-auto shrink-0">
-          <Menu items={[{ label: 'Edit floor plan', onClick: onEditPlan }, ...menu]} />
+          <Menu items={[{ label: 'Edit floor plan', onClick: onEditPlan }, { label: 'Map settings', onClick: () => setSettingsOpen(true) }, ...menu]} />
         </div>
       </header>
 
       {wide ? (
         <div className="flex min-h-0 flex-1">
-          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(PITCH_MAX)}</section>}
+          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(1)}</section>}
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto bg-stone-50">{content}</div>
             {addBar}
@@ -125,6 +115,7 @@ export function HomeView({
           {addBar}
         </>
       )}
+      {settingsOpen && <MapSettingsPanel settings={mapSettings} onChange={setMapSettings} onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
@@ -133,11 +124,11 @@ export function HomeView({
  * The map sits on top of the scrolling content and shrinks as the content
  * scrolls up underneath it, down to a minimum height.
  */
-function CollapsingMap({ map, resetKey, children }: { map: false | ((pitch: number) => ReactNode); resetKey: unknown; children: ReactNode }) {
+function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: number) => ReactNode); resetKey: unknown; children: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(0)
-  const [pitch, setPitch] = useState(PITCH_MIN)
+  const [progress, setProgress] = useState(0)
   const max = Math.round(height * 0.5)
   const min = Math.min(140, max)
 
@@ -152,8 +143,7 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((pitch: numb
   const resize = () => {
     const top = scrollRef.current!.scrollTop
     if (mapRef.current) mapRef.current.style.height = `${Math.max(min, max - top)}px`
-    const progress = max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1
-    setPitch(PITCH_MIN + (PITCH_MAX - PITCH_MIN) * progress)
+    setProgress(max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1)
   }
   useLayoutEffect(resize, [max, min, !!map])
 
@@ -179,7 +169,7 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((pitch: numb
       </div>
       {map && (
         <div ref={mapRef} className="absolute inset-x-0 top-0 z-20 border-b border-stone-200 bg-stone-100 shadow-sm">
-          {map(pitch)}
+          {map(progress)}
         </div>
       )}
     </div>
