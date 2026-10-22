@@ -26,14 +26,46 @@ interface Callbacks {
 interface Label {
   el: HTMLElement
   pill: HTMLElement
-  name: HTMLElement
-  badge: HTMLElement | null
+  /** leader line + anchor dot, shown while the label floats outside its room */
+  leader: SVGGElement
+  line: SVGLineElement[]
+  dot: SVGCircleElement
+  /** measured pill size in px (0 until first layout) */
+  w: number
+  h: number
   room: Room
   anchor: THREE.Vector3
   corners: THREE.Vector3[]
 }
 
 type Pt = { x: number; y: number }
+interface Rect { x0: number; y0: number; x1: number; y1: number }
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+const svgEl = <K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>) => {
+  const e = document.createElementNS(SVG_NS, tag)
+  for (const k in attrs) e.setAttribute(k, attrs[k])
+  return e
+}
+const rectsOverlap = (a: Rect, b: Rect, gap = 0) =>
+  a.x0 < b.x1 + gap && a.x1 + gap > b.x0 && a.y0 < b.y1 + gap && a.y1 + gap > b.y0
+const inPoly = (p: Pt, poly: Pt[]) => {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j]
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside
+  }
+  return inside
+}
+/** Whether the rect touches the polygon (screen space). */
+const rectHitsPoly = (r: Rect, poly: Pt[]) => {
+  const mx = (r.x0 + r.x1) / 2, my = (r.y0 + r.y1) / 2
+  const probes = [
+    [r.x0, r.y0], [r.x1, r.y0], [r.x0, r.y1], [r.x1, r.y1], [mx, my],
+    [mx, r.y0], [mx, r.y1], [r.x0, my], [r.x1, my],
+  ]
+  return probes.some(([x, y]) => inPoly({ x, y }, poly)) || poly.some((q) => q.x >= r.x0 && q.x <= r.x1 && q.y >= r.y0 && q.y <= r.y1)
+}
 
 const RAD = Math.PI / 180
 const TAP_SLOP = 6
@@ -58,6 +90,7 @@ export class MapEngine {
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
   private roomMeshes: THREE.Mesh[] = []
   private labels: Label[] = []
+  private leaders: SVGSVGElement | null = null
   private tmp = new THREE.Vector3()
 
   private data: MapData | null = null
@@ -191,6 +224,8 @@ export class MapEngine {
     })
     this.content.clear()
     this.labelHost.replaceChildren()
+    this.leaders = svgEl('svg', { class: 'absolute inset-0 h-full w-full overflow-visible' })
+    this.labelHost.append(this.leaders)
     this.roomMeshes = []
     this.labels = []
   }
@@ -273,23 +308,35 @@ export class MapEngine {
     const el = document.createElement('div')
     el.className = 'absolute left-0 top-0 will-change-transform'
     const pill = document.createElement('div')
-    pill.className = `flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 font-semibold leading-tight text-stone-800 ${selected ? 'ring-2 ring-blue-500' : 'ring-1 ring-black/5'}`
+    pill.className = `flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 pointer-events-auto cursor-pointer font-medium leading-tight ${selected ? 'text-stone-800 ring-2 ring-blue-500' : 'text-stone-600 ring-1 ring-black/5'}`
     pill.style.fontSize = `${11 * s.labelSize}px`
     const name = document.createElement('span')
     name.textContent = room.name
     pill.append(name)
-    let badge: HTMLElement | null = null
     if (open > 0) {
-      badge = document.createElement('span')
-      badge.className = 'rounded-full bg-amber-500 px-1.5 text-[0.9em] font-bold leading-snug text-white'
+      const badge = document.createElement('span')
+      badge.className = 'rounded-full bg-amber-500 px-1.5 text-[0.9em] font-semibold leading-snug text-white'
       badge.textContent = String(open)
       pill.append(badge)
     }
+    pill.style.background = selected ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.6)'
+    pill.style.boxShadow = selected ? '0 1px 4px rgba(0,0,0,0.14)' : 'none'
+    pill.addEventListener('click', () => this.cb.onSelect(room.id))
     el.append(pill)
     this.labelHost.append(el)
+
+    const leader = svgEl('g', {})
+    const line = [
+      svgEl('line', { stroke: 'rgba(255,255,255,0.5)', 'stroke-width': '3', 'stroke-linecap': 'round' }),
+      svgEl('line', { stroke: 'rgba(68,64,60,0.5)', 'stroke-width': '1', 'stroke-linecap': 'round' }),
+    ]
+    const dot = svgEl('circle', { r: '2.5', fill: 'rgba(68,64,60,0.6)', stroke: 'rgba(255,255,255,0.7)', 'stroke-width': '1' })
+    leader.append(...line, dot)
+    this.leaders!.append(leader)
+
     const p = labelPoint(room.points)
     this.labels.push({
-      el, pill, name, badge, room,
+      el, pill, leader, line, dot, w: 0, h: 0, room,
       anchor: new THREE.Vector3(p.x, lift + 0.02, p.y),
       corners: room.points.map((q: Vec) => new THREE.Vector3(q.x, lift, q.y)),
     })
@@ -451,30 +498,86 @@ export class MapEngine {
     this.placeLabels()
   }
 
+  /**
+   * Labels that fit inside their room stay there. The others float: they are moved just outside
+   * the building (or into any free spot) and tied to their room by a leader line and dot.
+   */
   private placeLabels() {
     const { w, h } = this.size
-    const size = this.data?.settings.labelSize ?? 1
-    const v = this.tmp
     const q = new THREE.Vector3()
-    for (const l of this.labels) {
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
-      for (const c of l.corners) {
-        q.copy(c).project(this.camera)
-        minX = Math.min(minX, q.x); maxX = Math.max(maxX, q.x)
-        minY = Math.min(minY, q.y); maxY = Math.max(maxY, q.y)
+    const MARGIN = 4
+    const project = (v: THREE.Vector3): Pt => {
+      q.copy(v).project(this.camera)
+      return { x: ((q.x + 1) / 2) * w, y: ((1 - q.y) / 2) * h }
+    }
+
+    const items = this.labels.map((l) => {
+      if (!l.w) {
+        l.w = l.pill.offsetWidth
+        l.h = l.pill.offsetHeight
       }
-      const rw = ((maxX - minX) / 2) * w
-      const rh = ((maxY - minY) / 2) * h
-      v.copy(l.anchor).project(this.camera)
-      const fits = rw > l.room.name.length * 6.5 * size + 36 && rh > 22 * size
-      // rooms too small for their name only show the TODO count, if any
-      l.name.style.display = fits ? '' : 'none'
-      l.pill.style.background = fits ? 'rgba(255,255,255,0.86)' : 'transparent'
-      l.pill.style.boxShadow = fits ? '0 1px 5px rgba(0,0,0,0.16)' : 'none'
-      l.pill.style.padding = fits ? '' : '0'
-      l.pill.style.setProperty('--tw-ring-shadow', fits ? '' : '0 0 #0000')
-      l.el.style.display = fits || l.badge ? '' : 'none'
-      l.el.style.transform = `translate(${((v.x + 1) / 2) * w}px, ${((1 - v.y) / 2) * h}px) translate(-50%, -50%)`
+      const poly = l.corners.map(project)
+      const xs = poly.map((p) => p.x), ys = poly.map((p) => p.y)
+      const rw = Math.max(...xs) - Math.min(...xs)
+      const rh = Math.max(...ys) - Math.min(...ys)
+      const a = project(l.anchor)
+      const fits = rw > l.w + 8 && rh > l.h + 4
+      return { l, poly, a, fits, pos: a }
+    })
+
+    const polys = items.map((i) => i.poly)
+    const boxOf = (p: Pt, l: Label): Rect => ({ x0: p.x - l.w / 2, y0: p.y - l.h / 2, x1: p.x + l.w / 2, y1: p.y + l.h / 2 })
+    const taken: Rect[] = items.filter((i) => i.fits).map((i) => boxOf(i.a, i.l))
+
+    // direction "away from the building", measured from the centre of everything on screen
+    const all = polys.flat()
+    const cx = all.length ? (Math.min(...all.map((p) => p.x)) + Math.max(...all.map((p) => p.x))) / 2 : w / 2
+    const cy = all.length ? (Math.min(...all.map((p) => p.y)) + Math.max(...all.map((p) => p.y))) / 2 : h / 2
+
+    const floating = items
+      .filter((i) => !i.fits)
+      .sort((m, n) => Math.hypot(n.a.x - cx, n.a.y - cy) - Math.hypot(m.a.x - cx, m.a.y - cy))
+
+    const STEP = Math.PI / 12
+    for (const it of floating) {
+      const { l, a } = it
+      const base = Math.hypot(a.x - cx, a.y - cy) > 1 ? Math.atan2(a.y - cy, a.x - cx) : -Math.PI / 2
+      // candidates ordered by cost: a short leader and little deviation from "straight outward"
+      const cands: { p: Pt; cost: number }[] = []
+      for (let r = 28; r <= 260; r += 14) {
+        for (let k = -12; k <= 12; k++) {
+          const ang = base + k * STEP
+          // keep the label's near edge, not just its centre, at distance r
+          const reach = r + Math.abs(Math.cos(ang)) * l.w / 2 + Math.abs(Math.sin(ang)) * l.h / 2
+          cands.push({ p: { x: a.x + Math.cos(ang) * reach, y: a.y + Math.sin(ang) * reach }, cost: r + Math.abs(k) * 14 })
+        }
+      }
+      cands.sort((m, n) => m.cost - n.cost)
+      const ok = (p: Pt, avoidRooms: boolean) => {
+        const r = boxOf(p, l)
+        if (r.x0 < MARGIN || r.y0 < MARGIN || r.x1 > w - MARGIN || r.y1 > h - MARGIN) return false
+        if (taken.some((t) => rectsOverlap(r, t, 3))) return false
+        return !avoidRooms || !polys.some((poly) => rectHitsPoly(r, poly))
+      }
+      const hit = cands.find((c) => ok(c.p, true)) ?? cands.find((c) => ok(c.p, false))
+      it.pos = hit?.p ?? a
+      taken.push(boxOf(it.pos, l))
+    }
+
+    for (const it of items) {
+      const { l, a, pos } = it
+      l.el.style.transform = `translate(${pos.x}px, ${pos.y}px) translate(-50%, -50%)`
+      l.leader.style.display = it.fits ? 'none' : ''
+      if (it.fits) continue
+      // leader ends where the line from the anchor meets the pill's edge
+      const dx = pos.x - a.x, dy = pos.y - a.y
+      const t = Math.min(dx ? l.w / 2 / Math.abs(dx) : Infinity, dy ? l.h / 2 / Math.abs(dy) : Infinity, 1)
+      const ex = pos.x - dx * t, ey = pos.y - dy * t
+      for (const ln of l.line) {
+        ln.setAttribute('x1', String(a.x)); ln.setAttribute('y1', String(a.y))
+        ln.setAttribute('x2', String(ex)); ln.setAttribute('y2', String(ey))
+      }
+      l.dot.setAttribute('cx', String(a.x)); l.dot.setAttribute('cy', String(a.y))
     }
   }
 }
