@@ -35,6 +35,8 @@ export interface MapSettings {
   labels: boolean
   /** Move every label out to the screen edges instead of keeping those that fit inside their room. */
   floatLabels: boolean
+  /** Record the label layout and its costs, to copy from the settings panel. */
+  debugLabels: boolean
   labelSize: number
 }
 
@@ -62,6 +64,7 @@ export const DEFAULT_MAP_SETTINGS: MapSettings = {
   shadowSoftness: 3,
   labels: true,
   floatLabels: true,
+  debugLabels: false,
   labelSize: 1,
 }
 
@@ -119,6 +122,7 @@ export const SETTING_GROUPS: { title: string; numbers?: Num[]; colors?: Color[];
     bools: [
       { key: 'labels', label: 'Show room names' },
       { key: 'floatLabels', label: 'Float all labels to the screen edges' },
+      { key: 'debugLabels', label: 'Debug: record label layout' },
     ],
     numbers: [{ key: 'labelSize', label: 'Label size', min: 0.6, max: 1.8, step: 0.05, unit: '×' }],
   },

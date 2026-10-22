@@ -1,4 +1,5 @@
 import { Button, Check, Slider } from '../panels/ui'
+import { labelDebug } from './MapEngine'
 import { DEFAULT_MAP_SETTINGS, SETTING_GROUPS, type MapSettings } from './settings'
 
 /** A bottom sheet for tweaking the look of the map; the map stays visible above it. */
@@ -17,6 +18,9 @@ export function MapSettingsPanel({
         <Button className="ml-auto" onClick={() => navigator.clipboard?.writeText(JSON.stringify(settings, null, 2))}>
           Copy JSON
         </Button>
+        {settings.debugLabels && (
+          <Button onClick={() => navigator.clipboard?.writeText(labelDebug.snapshot)}>Copy labels</Button>
+        )}
         <Button onClick={() => onChange(DEFAULT_MAP_SETTINGS)}>Reset</Button>
         <Button variant="primary" onClick={onClose}>Done</Button>
       </div>

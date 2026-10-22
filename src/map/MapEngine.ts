@@ -67,6 +67,20 @@ const rectHitsPoly = (r: Rect, poly: Pt[]) => {
   return probes.some(([x, y]) => inPoly({ x, y }, poly)) || poly.some((q) => q.x >= r.x0 && q.x <= r.x1 && q.y >= r.y0 && q.y <= r.y1)
 }
 
+const ccw = (p: Pt, q: Pt, r: Pt) => (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x)
+const segsCross = (p1: Pt, p2: Pt, p3: Pt, p4: Pt) => ccw(p1, p2, p3) * ccw(p1, p2, p4) < 0 && ccw(p3, p4, p1) * ccw(p3, p4, p2) < 0
+const segHitsRect = (p: Pt, q: Pt, r: Rect) => {
+  const inside = (v: Pt) => v.x >= r.x0 && v.x <= r.x1 && v.y >= r.y0 && v.y <= r.y1
+  if (inside(p) || inside(q)) return true
+  const c = [{ x: r.x0, y: r.y0 }, { x: r.x1, y: r.y0 }, { x: r.x1, y: r.y1 }, { x: r.x0, y: r.y1 }]
+  return c.some((v, i) => segsCross(p, q, v, c[(i + 1) % 4]))
+}
+const segHitsPoly = (p: Pt, q: Pt, poly: Pt[]) =>
+  inPoly(p, poly) || inPoly(q, poly) || poly.some((v, i) => segsCross(p, q, v, poly[(i + 1) % poly.length]))
+
+/** Latest label layout, for debugging (see the `debugLabels` setting): paste it to someone who can analyse it. */
+export const labelDebug = { snapshot: '' }
+
 const RAD = Math.PI / 180
 const TAP_SLOP = 6
 const WARM_WHITE = new THREE.Color('#faf7f2')
@@ -91,6 +105,7 @@ export class MapEngine {
   private roomMeshes: THREE.Mesh[] = []
   private labels: Label[] = []
   private leaders: SVGSVGElement | null = null
+  private controlCount = 0
   private tmp = new THREE.Vector3()
 
   private data: MapData | null = null
@@ -369,7 +384,9 @@ export class MapEngine {
     this.camera.position.set(t.x + d * Math.sin(p) * Math.sin(y), t.y + d * Math.cos(p), t.z + d * Math.sin(p) * Math.cos(y))
     this.camera.lookAt(t)
     this.camera.updateMatrixWorld()
-    if (notify) this.cb.onView({ rotated: Math.abs(Math.atan2(Math.sin(y), Math.cos(y))) > 1e-3, fitted: this.autoFit })
+    const rotated = Math.abs(Math.atan2(Math.sin(y), Math.cos(y))) > 1e-3
+    this.controlCount = (rotated ? 1 : 0) + (this.autoFit ? 0 : 1) // the buttons PlanMap3D shows
+    if (notify) this.cb.onView({ rotated, fitted: this.autoFit })
   }
 
   /** The point of the floor under a screen position. */
@@ -523,14 +540,14 @@ export class MapEngine {
       const rh = Math.max(...ys) - Math.min(...ys)
       const a = project(l.anchor)
       const fits = !edge && rw > l.w + 8 && rh > l.h + 4
-      return { l, poly, a, fits, pos: a }
+      return { l, poly, a, fits, pos: a, placed: false }
     })
 
     const polys = items.map((i) => i.poly)
     const boxOf = (p: Pt, l: Label): Rect => ({ x0: p.x - l.w / 2, y0: p.y - l.h / 2, x1: p.x + l.w / 2, y1: p.y + l.h / 2 })
     const taken: Rect[] = items.filter((i) => i.fits).map((i) => boxOf(i.a, i.l))
-    // keep clear of the map controls in the bottom right corner
-    taken.push({ x0: w - 56, y0: h - 100, x1: w, y1: h })
+    // keep clear of the map buttons in the bottom right corner (36px each, 12px from the edges)
+    if (this.controlCount) taken.push({ x0: w - 52, y0: h - 12 - 36 * this.controlCount - 4, x1: w, y1: h })
 
     // direction "away from the building", measured from the centre of everything on screen
     const all = polys.flat()
@@ -541,48 +558,153 @@ export class MapEngine {
       .filter((i) => !i.fits)
       .sort((m, n) => Math.hypot(n.a.x - cx, n.a.y - cy) - Math.hypot(m.a.x - cx, m.a.y - cy))
 
-    const STEP = Math.PI / 12
+    // penalties, in px-equivalents of leader length
+    const W = {
+      coverRoom: 400, // the label itself sits on top of a room
+      lineRoom: 40, // the leader passes over a foreign room (each)
+      lineLine: 120, // the leader crosses another leader (each)
+      lineLabel: 300, // the leader runs through another label, or another leader through this label (each)
+    }
+    const inView = (r: Rect) => r.x0 >= MARGIN && r.y0 >= MARGIN && r.x1 <= w - MARGIN && r.y1 <= h - MARGIN
+    type Item = (typeof items)[number]
+    const fixedLabels = items.filter((i) => i.fits)
+
+    /** Costs that depend only on the label and its own spot. */
+    const staticTerms = (it: Item, p: Pt) => {
+      const r = boxOf(p, it.l)
+      return {
+        dist: Math.hypot(p.x - it.a.x, p.y - it.a.y),
+        coverRoom: polys.some((poly) => rectHitsPoly(r, poly)) ? W.coverRoom : 0,
+        lineRoom: W.lineRoom * items.filter((o) => o !== it && segHitsPoly(it.a, p, o.poly)).length,
+      }
+    }
+    /** Costs that depend on where the other labels currently are. */
+    const dynamicTerms = (it: Item, p: Pt) => {
+      const r = boxOf(p, it.l)
+      const others = floating.filter((o) => o !== it && o.placed)
+      return {
+        lineLine: W.lineLine * others.filter((o) => segsCross(it.a, p, o.a, o.pos)).length,
+        lineLabel:
+          W.lineLabel *
+          (fixedLabels.filter((o) => segHitsRect(it.a, p, boxOf(o.a, o.l))).length +
+            others.filter((o) => segHitsRect(it.a, p, boxOf(o.pos, o.l)) || segHitsRect(o.a, o.pos, r)).length),
+      }
+    }
+    const sum = (t: Record<string, number>) => Object.values(t).reduce((m, n) => m + n, 0)
+    const costAt = (it: Item, p: Pt) => sum(staticTerms(it, p)) + sum(dynamicTerms(it, p))
+
+    // 1. candidate spots per label: along the screen border, or in rings around the room
+    type Cand = { p: Pt; rect: Rect; cost: number }
+    const candsOf = new Map<Item, Cand[]>()
     for (const it of floating) {
       const { l, a } = it
+      const spots: Pt[] = []
       if (edge) {
-        // every spot along the screen border; the nearest free one wins, covering a room is costly
-        const cands: Pt[] = []
         const x0 = MARGIN + l.w / 2, x1 = w - MARGIN - l.w / 2, y0 = MARGIN + l.h / 2, y1 = h - MARGIN - l.h / 2
-        for (let x = x0; x <= x1; x += 10) cands.push({ x, y: y0 }, { x, y: y1 })
-        for (let y = y0; y <= y1; y += 10) cands.push({ x: x0, y }, { x: x1, y })
-        let best: Pt | null = null
-        let bestCost = Infinity
-        for (const p of cands) {
-          const r = boxOf(p, l)
-          if (taken.some((t) => rectsOverlap(r, t, 3))) continue
-          const cost = Math.hypot(p.x - a.x, p.y - a.y) + (polys.some((poly) => rectHitsPoly(r, poly)) ? 400 : 0)
-          if (cost < bestCost) { bestCost = cost; best = p }
-        }
-        it.pos = best ?? a
-        taken.push(boxOf(it.pos, l))
-        continue
-      }
-      const base = Math.hypot(a.x - cx, a.y - cy) > 1 ? Math.atan2(a.y - cy, a.x - cx) : -Math.PI / 2
-      // candidates ordered by cost: a short leader and little deviation from "straight outward"
-      const cands: { p: Pt; cost: number }[] = []
-      for (let r = 28; r <= 260; r += 14) {
-        for (let k = -12; k <= 12; k++) {
-          const ang = base + k * STEP
-          // keep the label's near edge, not just its centre, at distance r
-          const reach = r + Math.abs(Math.cos(ang)) * l.w / 2 + Math.abs(Math.sin(ang)) * l.h / 2
-          cands.push({ p: { x: a.x + Math.cos(ang) * reach, y: a.y + Math.sin(ang) * reach }, cost: r + Math.abs(k) * 14 })
+        for (let x = x0; x <= x1; x += 10) spots.push({ x, y: y0 }, { x, y: y1 })
+        for (let y = y0; y <= y1; y += 10) spots.push({ x: x0, y }, { x: x1, y })
+      } else {
+        for (let r = 28; r <= 260; r += 10) {
+          for (let k = 0; k < 24; k++) {
+            const ang = (k * Math.PI) / 12
+            // keep the label's near edge, not just its centre, at distance r
+            const reach = r + (Math.abs(Math.cos(ang)) * l.w) / 2 + (Math.abs(Math.sin(ang)) * l.h) / 2
+            spots.push({ x: a.x + Math.cos(ang) * reach, y: a.y + Math.sin(ang) * reach })
+          }
         }
       }
-      cands.sort((m, n) => m.cost - n.cost)
-      const ok = (p: Pt, avoidRooms: boolean) => {
-        const r = boxOf(p, l)
-        if (r.x0 < MARGIN || r.y0 < MARGIN || r.x1 > w - MARGIN || r.y1 > h - MARGIN) return false
-        if (taken.some((t) => rectsOverlap(r, t, 3))) return false
-        return !avoidRooms || !polys.some((poly) => rectHitsPoly(r, poly))
+      candsOf.set(
+        it,
+        spots.map((p) => ({ p, rect: boxOf(p, l) })).filter((c) => inView(c.rect)).map((c) => ({ ...c, cost: sum(staticTerms(it, c.p)) })),
+      )
+    }
+
+    const free = (rect: Rect, skip: Item[]) =>
+      !taken.some((t) => rectsOverlap(rect, t, 3)) &&
+      !floating.some((o) => !skip.includes(o) && o.placed && rectsOverlap(rect, boxOf(o.pos, o.l), 3))
+
+    // 2. greedy start: furthest-out labels first, each taking its cheapest free spot
+    for (const it of floating) {
+      const best = candsOf.get(it)!.filter((c) => free(c.rect, [it])).sort((m, n) => m.cost - n.cost)[0]
+      it.placed = !!best
+      if (best) it.pos = best.p
+      else taken.push(boxOf(it.a, it.l))
+    }
+    const movable = floating.filter((it) => it.placed)
+
+    // 3. refine: greedy order alone gives odd results (e.g. two labels that would both be closer if swapped),
+    //    so repeatedly move single labels and swap pairs while that lowers the total cost
+    for (let pass = 0; pass < 6; pass++) {
+      let changed = false
+      for (const it of movable) {
+        let best = costAt(it, it.pos)
+        let bestP: Pt | null = null
+        for (const c of candsOf.get(it)!) {
+          if (c.cost >= best || !free(c.rect, [it])) continue
+          const v = c.cost + sum(dynamicTerms(it, c.p))
+          if (v < best - 0.5) { best = v; bestP = c.p }
+        }
+        if (bestP) { it.pos = bestP; changed = true }
       }
-      const hit = cands.find((c) => ok(c.p, true)) ?? cands.find((c) => ok(c.p, false))
-      it.pos = hit?.p ?? a
-      taken.push(boxOf(it.pos, l))
+      for (let i = 0; i < movable.length; i++) {
+        for (let j = i + 1; j < movable.length; j++) {
+          const m = movable[i], n = movable[j]
+          const rm = boxOf(n.pos, m.l), rn = boxOf(m.pos, n.l)
+          if (!inView(rm) || !inView(rn) || rectsOverlap(rm, rn, 3) || !free(rm, [m, n]) || !free(rn, [m, n])) continue
+          const before = costAt(m, m.pos) + costAt(n, n.pos)
+          const mp = m.pos, np = n.pos
+          m.pos = np; n.pos = mp
+          if (costAt(m, m.pos) + costAt(n, n.pos) < before - 0.5) changed = true
+          else { m.pos = mp; n.pos = np }
+        }
+      }
+      if (changed) continue
+      // 4. stuck: a label with a conflict may need another one to step aside first (two labels crossing
+      //    can often only be untangled by moving both), so try joint moves of the top spots of each pair
+      const K = 24
+      const top = new Map(movable.map((it) => [it, [...candsOf.get(it)!].sort((m, n) => m.cost - n.cost).slice(0, K)]))
+      const conflicted = movable.filter((it) => sum(dynamicTerms(it, it.pos)) > 0)
+      for (const m of conflicted) {
+        for (const n of movable) {
+          if (n === m) continue
+          const mp = m.pos, np = n.pos
+          let best = costAt(m, mp) + costAt(n, np)
+          let pick: [Pt, Pt] | null = null
+          for (const cm of top.get(m)!) {
+            if (!free(cm.rect, [m, n])) continue
+            for (const cn of top.get(n)!) {
+              if (rectsOverlap(cm.rect, cn.rect, 3) || !free(cn.rect, [m, n])) continue
+              m.pos = cm.p; n.pos = cn.p
+              const v = cm.cost + cn.cost + sum(dynamicTerms(m, cm.p)) + sum(dynamicTerms(n, cn.p))
+              if (v < best - 0.5) { best = v; pick = [cm.p, cn.p] }
+            }
+          }
+          m.pos = pick ? pick[0] : mp
+          n.pos = pick ? pick[1] : np
+          if (pick) changed = true
+        }
+      }
+      if (!changed) break
+    }
+
+    if (this.data?.settings.debugLabels) {
+      const r = (n: number) => Math.round(n)
+      const pt = (p: Pt) => [r(p.x), r(p.y)]
+      labelDebug.snapshot = JSON.stringify({
+        viewport: { w, h }, edge, labelSize: this.data.settings.labelSize, weights: W,
+        labels: items.map((it) => {
+          const base = { room: it.l.room.name, size: [r(it.l.w), r(it.l.h)], anchor: pt(it.a), roomOnScreen: it.poly.map(pt) }
+          if (it.fits) return { ...base, mode: 'inside room' }
+          if (!it.placed) return { ...base, mode: 'floating, NO FREE SPOT' }
+          const terms = { ...staticTerms(it, it.pos), ...dynamicTerms(it, it.pos) }
+          const alternatives = candsOf.get(it)!
+            .filter((c) => free(c.rect, [it]) && (c.p.x !== it.pos.x || c.p.y !== it.pos.y))
+            .map((c) => ({ c, v: c.cost + sum(dynamicTerms(it, c.p)) }))
+            .sort((m, n) => m.v - n.v).slice(0, 3)
+            .map(({ c, v }) => ({ at: pt(c.p), cost: r(v), ...staticTerms(it, c.p), ...dynamicTerms(it, c.p) }))
+          return { ...base, mode: 'floating', at: pt(it.pos), cost: r(sum(terms)), terms, bestAlternatives: alternatives }
+        }),
+      }, null, 1)
     }
 
     for (const it of items) {
