@@ -19,11 +19,12 @@ pnpm dev
 2. **Edit floor plan** (from the menu, or the first-run onboarding): upload a
    floor plan (image or PDF) as a stencil, set the scale by measuring a known
    dimension, then trace rooms:
-   - **Rectangle** (R) / **Polygon** (P): manual drawing with snapping to existing
+   - **Draw** (D): place a room's corners, with snapping to existing
      corners/walls, angles snapping parallel/perpendicular to existing walls,
-     alignment guides and typed lengths.
-   - **Split** (X): trace the whole outline first, then cut it into rooms –
-     tap a wall, optionally tap inside for bends, tap the opposite wall.
+     alignment guides and typed lengths. Rooms never overlap: a new shape is
+     trimmed to the space existing rooms leave free, and a path drawn from a
+     room's wall through it to another wall splits that room (e.g. trace the
+     whole outline first, then split it into rooms).
    - **Select** (V): drag corners, walls or whole rooms; add/remove corners.
 
    On touch devices, points follow the finger and are placed when it's lifted;

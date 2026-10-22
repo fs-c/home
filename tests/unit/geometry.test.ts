@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { area, cleanPolygon, dominantAngle, orthogonalize, removeJogs, removeNotches, rotate, splitPolygon } from '../../src/lib/geometry'
+import { area, cleanPolygon, dominantAngle, orthogonalize, removeJogs, removeNotches, rotate, splitPolygon, subtractPolygons } from '../../src/lib/geometry'
 
 describe('geometry', () => {
   it('computes polygon area regardless of winding', () => {
@@ -82,5 +82,34 @@ describe('splitPolygon', () => {
     expect(splitPolygon(rect, [{ x: 4, y: 1 }, { x: 4, y: 6 }])).toBeNull() // starts inside
     expect(splitPolygon(rect, [{ x: 4, y: 0 }, { x: 12, y: 3 }, { x: 4, y: 6 }])).toBeNull() // leaves the room
     expect(splitPolygon(rect, [{ x: 0, y: 0 }, { x: 10, y: 0 }])).toBeNull() // along a wall
+  })
+})
+
+describe('subtractPolygons', () => {
+  const rect = (x0: number, y0: number, x1: number, y1: number) =>
+    [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }]
+  const room = rect(0, 0, 4, 4)
+
+  it('keeps a shape that touches nothing', () => {
+    expect(subtractPolygons(rect(4, 0, 8, 4), [room])!.map(area)).toEqual([16])
+  })
+
+  it('trims the part that overlaps an existing room', () => {
+    const r = subtractPolygons(rect(3, 0, 8, 4), [room])!
+    expect(r).toHaveLength(1)
+    expect(area(r[0])).toBeCloseTo(16, 9)
+  })
+
+  it('returns nothing for a shape inside an existing room', () => {
+    expect(subtractPolygons(rect(1, 1, 2, 2), [room])).toEqual([])
+  })
+
+  it('returns separate pieces when a room divides the shape', () => {
+    const r = subtractPolygons(rect(-2, 1, 6, 2), [room])!
+    expect(r.map(area).sort()).toEqual([2, 2])
+  })
+
+  it('rejects a shape that would surround a room', () => {
+    expect(subtractPolygons(rect(-1, -1, 5, 5), [room])).toBeNull()
   })
 })

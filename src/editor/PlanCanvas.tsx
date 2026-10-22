@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import {
   add, area, boundaryParam, bounds, cleanPolygon, dist, dot, fmtArea, fmtLen, labelPoint, len, mid, mul,
-  pointInPolygon, projectOnSegment, rotate, splitPolygon, sub,
+  pointInPolygon, projectOnSegment, rotate, splitPolygon, sub, subtractPolygons,
 } from '../lib/geometry'
 import { isTyping } from '../lib/dom'
 import { nextRoomColor, nextRoomName } from '../model/doc'
@@ -11,7 +11,7 @@ import type { Floor, Room, Vec } from '../model/types'
 import { mainFrame, snapPoint, targetsFrom, type Guide, type SnapResult, type SnapSettings } from './snapping'
 import { backdropCorners, backdropTransform } from '../model/backdrop'
 
-export type Tool = 'select' | 'polygon' | 'rect' | 'split' | 'calibrate'
+export type Tool = 'select' | 'polygon' | 'calibrate'
 export type Mode = 'plan' | 'home'
 
 interface View {
@@ -49,7 +49,6 @@ type Drag =
   | { type: 'vertex'; roomId: string; idx: number; started: boolean; sx: number; sy: number }
   | { type: 'edge'; roomId: string; idx: number; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
   | { type: 'room'; roomId: string; start: Vec; orig: Vec[]; started: boolean; sx: number; sy: number }
-  | { type: 'rect'; sx: number; sy: number }  // dragging the first wall of a rectangle
   /** An end of the scale line; it moves with the pointer rather than jumping under it. */
   | { type: 'calib'; idx: number; start: Vec; orig: Vec; started: boolean; sx: number; sy: number }
 
@@ -76,6 +75,8 @@ interface Props {
 }
 
 const DRAG_THRESHOLD = 3
+/** Smallest area (m²) a drawn shape needs to become a room. */
+const MIN_ROOM_AREA = 0.05
 
 export function PlanCanvas(props: Props) {
   const { floor, mode, tool, selectedId, snap } = props
@@ -85,11 +86,7 @@ export function PlanCanvas(props: Props) {
   const [view, setView] = useState<View>({ tx: 40, ty: 40, k: 50, r: 0 })
   const [cursor, setCursor] = useState<SnapResult | null>(null)
   const [draft, setDraft] = useState<Vec[]>([])
-  /** Rectangle tool: first wall (1–2 points), then depth. */
-  const [rectPts, setRectPts] = useState<Vec[]>([])
   const [calibStart, setCalibStart] = useState<Vec | null>(null)
-  /** Split tool: the cut being drawn (starts and ends on a wall of one room). */
-  const [cut, setCut] = useState<Vec[]>([])
   const [lengthInput, setLengthInput] = useState('')
   const [hover, setHover] = useState<string | null>(null)
   /** Select tool: a corner tapped without dragging, offered for removal. */
@@ -107,9 +104,7 @@ export function PlanCanvas(props: Props) {
   // Reset transient drawing state when the tool or floor changes.
   useEffect(() => {
     setDraft([])
-    setRectPts([])
     setCalibStart(null)
-    setCut([])
     setLengthInput('')
   }, [tool, floor.id, mode])
   useEffect(() => setActiveVertex(null), [tool, selectedId])
@@ -226,31 +221,17 @@ export function PlanCanvas(props: Props) {
 
   const openEdges = (pts: Vec[]) => pts.slice(1).map((p, i) => [pts[i], p] as [Vec, Vec])
 
-  /** Rectangle depth direction: perpendicular to the first wall. */
-  const rectNormal = (a: Vec, b: Vec) => {
-    const l = dist(a, b)
-    return { x: -(b.y - a.y) / l, y: (b.x - a.x) / l }
-  }
-
   const snapFor = (raw: Vec, e: { shiftKey: boolean; altKey: boolean }): SnapResult => {
     const s = snapSettings(e)
     if (tool === 'polygon') {
       const close = draft.length >= 2 ? draft[0] : undefined
       return snapPoint(raw, allTargets(draft, openEdges(draft)), view.k, s, draft[draft.length - 1], undefined, close)
     }
-    if (tool === 'rect') {
-      if (rectPts.length === 2) {
-        const [a, b] = rectPts
-        return snapPoint(raw, allTargets([], [[a, b]]), view.k, s, b, rectNormal(a, b))
-      }
-      return snapPoint(raw, allTargets(), view.k, s, rectPts[0])
-    }
     if (tool === 'calibrate') return snapPoint(raw, allTargets(), view.k, s, calibStart ?? undefined)
-    if (tool === 'split') return snapPoint(raw, allTargets(cut, openEdges(cut)), view.k, s, cut[cut.length - 1])
     return { p: raw, kind: 'none', guides: [] }
   }
 
-  /** The room a cut goes through: starts on its wall, first segment runs inside it. */
+  /** The room a path cuts through: it starts on the room's wall and its first segment runs inside. */
   const cutRoom = (pts: Vec[]): Room | undefined =>
     pts.length < 2
       ? undefined
@@ -272,36 +253,39 @@ export function PlanCanvas(props: Props) {
     return best
   }
 
-  const placeCutPoint = (placed: Vec) => {
-    let p = placed
-    if (!cut.length) {
-      p = ontoWall(p, floor.rooms)
-      if (!floor.rooms.some((r) => boundaryParam(r.points, p) !== null)) {
-        props.onMessage('Start the cut on a wall of a room (it snaps when you get close).')
-        return
-      }
-      setCut([p])
+  // ---------- mutations ----------
+
+  /** Add the drawn shape as a room, minus whatever existing rooms already cover. */
+  const addRoom = (points: Vec[]) => {
+    const pts = cleanPolygon(points, 1e-4)
+    if (pts.length < 3 || area(pts) < MIN_ROOM_AREA) {
+      props.onMessage('That shape is too small to be a room.')
       return
     }
-    let next = [...cut, p]
-    const room = cutRoom(next)
-    if (!room) {
-      props.onMessage('The cut has to run through the inside of a room.')
-      return
-    }
-    p = ontoWall(p, [room])
-    next = [...cut, p]
-    if (boundaryParam(room.points, p) === null) {
-      if (pointInPolygon(p, room.points)) setCut(next)
-      else props.onMessage('Keep the cut inside the room, and finish it on a wall.')
-      return
-    }
-    const pieces = splitPolygon(room.points, next)
+    const pieces = subtractPolygons(pts, floor.rooms.map((r) => r.points))
     if (!pieces) {
-      props.onMessage("Can't split along that line – it must stay inside the room.")
+      props.onMessage("A room can't surround another room.")
       return
     }
-    // The bigger piece keeps the room's identity (name, notes, colour).
+    // slivers are left over where the shape overlaps an existing wall a little
+    const parts = pieces.map((q) => cleanPolygon(q, 1e-4)).filter((q) => q.length >= 3 && area(q) >= MIN_ROOM_AREA)
+    if (!parts.length) {
+      props.onMessage('That area is already part of a room. To split a room, draw from one of its walls to another.')
+      return
+    }
+    parts.sort((a, b) => area(b) - area(a))
+    const rooms: Room[] = []
+    for (const q of parts) {
+      const f = { ...floor, rooms: [...floor.rooms, ...rooms] }
+      rooms.push({ id: uid(), name: nextRoomName(f), color: nextRoomColor(f), points: q, items: [] })
+    }
+    props.commit((f) => ({ ...f, rooms: [...f.rooms, ...rooms] }))
+    props.onSelect(rooms[0].id)
+    if (rooms.length > 1) props.onMessage(`Existing rooms divide that shape, so it became ${rooms.length} rooms.`)
+  }
+
+  /** Replace a room by two pieces; the bigger one keeps its identity (name, notes, colour). */
+  const splitRoom = (room: Room, pieces: [Vec[], Vec[]]) => {
     const [big, small] = area(pieces[0]) >= area(pieces[1]) ? pieces : [pieces[1], pieces[0]]
     const newRoom: Room = { id: uid(), name: nextRoomName(floor), color: nextRoomColor(floor), points: small, items: [] }
     props.commit((f) => ({
@@ -309,31 +293,7 @@ export function PlanCanvas(props: Props) {
       rooms: f.rooms.flatMap((r) => (r.id === room.id ? [{ ...r, points: big }, newRoom] : [r])),
     }))
     props.onSelect(newRoom.id)
-    setCut([])
     props.onMessage(`Split "${room.name}" into ${fmtArea(area(big))} and ${fmtArea(area(small))} (${newRoom.name}).`)
-  }
-
-  /** The rectangle being drawn, once its first wall exists. */
-  const rectPreview = (cp: Vec | undefined): Vec[] | null => {
-    if (rectPts.length === 1 && cp) return [rectPts[0], cp]
-    if (rectPts.length !== 2 || !cp) return null
-    const [a, b] = rectPts
-    const n = rectNormal(a, b)
-    const depth = mul(n, dot(sub(cp, b), n))
-    return [a, b, add(b, depth), add(a, depth)]
-  }
-
-  // ---------- mutations ----------
-
-  const addRoom = (points: Vec[]) => {
-    const pts = cleanPolygon(points, 1e-4)
-    if (pts.length < 3 || area(pts) < 0.05) {
-      props.onMessage('That shape is too small to be a room.')
-      return
-    }
-    const room: Room = { id: uid(), name: nextRoomName(floor), color: nextRoomColor(floor), points: pts, items: [] }
-    props.commit((f) => ({ ...f, rooms: [...f.rooms, room] }))
-    props.onSelect(room.id)
   }
 
   const setRoomPoints = (roomId: string, points: Vec[]) =>
@@ -345,13 +305,27 @@ export function PlanCanvas(props: Props) {
     setLengthInput('')
   }
 
-  const placePolygonPoint = (p: Vec) => {
+  const placePolygonPoint = (placed: Vec) => {
+    // starting on a wall lets the path split that room
+    const p = draft.length ? placed : ontoWall(placed, floor.rooms)
     const last = draft[draft.length - 1]
     if (draft.length >= 3 && dist(p, draft[0]) < 1e-6) {
       finishPolygon()
       return
     }
     if (last && dist(p, last) < 1e-6) return
+    // A path from one of a room's walls through its inside to a wall again splits the room.
+    const room = cutRoom([...draft, p])
+    if (room && draft.length) {
+      const end = ontoWall(p, [room])
+      const pieces = boundaryParam(room.points, end) !== null ? splitPolygon(room.points, [...draft, end]) : null
+      if (pieces) {
+        splitRoom(room, pieces)
+        setDraft([])
+        setLengthInput('')
+        return
+      }
+    }
     setDraft([...draft, p])
   }
 
@@ -438,7 +412,7 @@ export function PlanCanvas(props: Props) {
 
     const snapped = snapFor(world, e)
     if (e.pointerType === 'mouse') {
-      place(snapped.p, e)
+      place(snapped.p)
     } else {
       setCursor(snapped)
       drag.current = { type: 'aim' }
@@ -446,19 +420,9 @@ export function PlanCanvas(props: Props) {
   }
 
   /** Place a point with the current drawing tool. */
-  const place = (p: Vec, e?: ReactPointerEvent) => {
+  const place = (p: Vec) => {
     if (tool === 'polygon') {
       placePolygonPoint(p)
-    } else if (tool === 'rect') {
-      if (rectPts.length === 2) {
-        finishRect(rectPreview(p)!)
-      } else if (rectPts.length === 1) {
-        if (dist(rectPts[0], p) > 1e-6) setRectPts([rectPts[0], p])
-      } else {
-        setRectPts([p])
-        // with a mouse, the first wall can also be dragged out
-        if (e) drag.current = { type: 'rect', sx: e.clientX, sy: e.clientY }
-      }
     } else if (tool === 'calibrate') {
       if (!bd) {
         props.onMessage('Upload a floor plan first.')
@@ -468,15 +432,7 @@ export function PlanCanvas(props: Props) {
       } else {
         setCalibStart(p)
       }
-    } else if (tool === 'split') {
-      placeCutPoint(p)
     }
-  }
-
-  const finishRect = (pts: Vec[]) => {
-    setRectPts([])
-    if (dist(pts[1], pts[2]) < 1e-3) return
-    addRoom(pts)
   }
 
   const onPointerMove = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -592,9 +548,6 @@ export function PlanCanvas(props: Props) {
     }
     if (d?.type === 'vertex' && !d.started) setActiveVertex(d.idx)
     if (d?.type === 'vertex' || d?.type === 'edge' || d?.type === 'calib') setCursor(null)
-    if (d?.type === 'rect' && rectPts.length === 1 && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > DRAG_THRESHOLD) {
-      setRectPts([rectPts[0], snapFor(toWorld(e.clientX, e.clientY), e).p])
-    }
   }
 
   const onPointerCancel = (e: ReactPointerEvent<SVGSVGElement>) => {
@@ -663,17 +616,7 @@ export function PlanCanvas(props: Props) {
       }
       return
     }
-    if (tool === 'split' && cut.length > 0) {
-      if (e.key === 'Backspace') {
-        setCut((c) => c.slice(0, -1))
-        e.preventDefault()
-      } else if (e.key === 'Escape') {
-        setCut([])
-      }
-      return
-    }
     if (e.key === 'Escape') {
-      setRectPts([])
       setCalibStart(null)
       if (tool === 'select') props.onSelect(null)
     }
@@ -835,9 +778,13 @@ export function PlanCanvas(props: Props) {
   if (drawing && tool === 'polygon' && draft.length) {
     const last = draft[draft.length - 1]
     const pts = cp ? [...draft, cp] : draft
+    // a path into a room from its wall will split it rather than become a room
+    const target = cutRoom(pts)
     draftEls = (
       <g className="pointer-events-none">
-        {draft.length >= 2 && (
+        {target ? (
+          <polygon points={pointsAttr(target.points)} fill="none" stroke="#0891b2" strokeWidth={3} strokeDasharray="6 4" />
+        ) : draft.length >= 2 && (
           <polygon points={pointsAttr(pts)} fill="#3b82f6" fillOpacity={0.12} stroke="none" />
         )}
         <polyline points={pointsAttr(pts)} fill="none" stroke="#2563eb" strokeWidth={2} />
@@ -845,32 +792,6 @@ export function PlanCanvas(props: Props) {
           <circle key={i} cx={p.x} cy={p.y} r={i === 0 ? 6 : 4} className={i === 0 ? 'fill-blue-600' : 'fill-white stroke-blue-600'} strokeWidth={1.5} />
         ))}
         {cp && <MeasureLabel a={last} b={cp} toScreen={S} text={lengthInput ? `${lengthInput} m ⏎` : undefined} />}
-      </g>
-    )
-  } else if (drawing && tool === 'rect' && rectPreview(cp)) {
-    const pts = rectPreview(cp)!
-    draftEls = (
-      <g className="pointer-events-none">
-        <polygon points={pointsAttr(pts)} fill="#3b82f6" fillOpacity={0.12} stroke="#2563eb" strokeWidth={2} />
-        <MeasureLabel a={pts[0]} b={pts[1]} toScreen={S} />
-        {pts.length === 4 && <MeasureLabel a={pts[1]} b={pts[2]} toScreen={S} />}
-      </g>
-    )
-  }
-
-  if (drawing && tool === 'split' && cut.length) {
-    const pts = cp ? [...cut, cp] : cut
-    const target = cutRoom(pts)
-    draftEls = (
-      <g className="pointer-events-none">
-        {target && (
-          <polygon points={pointsAttr(target.points)} fill="none" stroke="#0891b2" strokeWidth={3} strokeDasharray="6 4" />
-        )}
-        <polyline points={pointsAttr(pts)} fill="none" stroke="#dc2626" strokeWidth={2.5} strokeDasharray="8 4" />
-        {cut.map(S).map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={4} className="fill-white stroke-red-600" strokeWidth={1.5} />
-        ))}
-        {cp && <MeasureLabel a={cut[cut.length - 1]} b={cp} toScreen={S} />}
       </g>
     )
   }
@@ -925,13 +846,10 @@ export function PlanCanvas(props: Props) {
   if (drawing && tool === 'polygon' && draft.length) {
     actions.push(
       { label: 'Undo point', onClick: () => setDraft((d) => d.slice(0, -1)) },
-      { label: 'Finish room', onClick: finishPolygon, primary: true, disabled: draft.length < 3 },
+      // a path that is splitting a room ends on a wall rather than being closed
+      { label: 'Finish room', onClick: finishPolygon, primary: true, disabled: draft.length < 3 || !!cutRoom(draft) },
       { label: 'Cancel', onClick: () => setDraft([]) },
     )
-  } else if (drawing && tool === 'split' && cut.length) {
-    actions.push({ label: 'Undo point', onClick: () => setCut((c) => c.slice(0, -1)) }, { label: 'Cancel', onClick: () => setCut([]) })
-  } else if (drawing && tool === 'rect' && rectPts.length) {
-    actions.push({ label: 'Cancel', onClick: () => setRectPts([]) })
   } else if (drawing && tool === 'calibrate' && calibStart) {
     actions.push({ label: 'Cancel', onClick: () => setCalibStart(null) })
   } else if (showHandles && activeVertex !== null && selected && selected.points.length > 3) {

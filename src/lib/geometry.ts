@@ -1,3 +1,4 @@
+import polygonClipping, { type Pair } from 'polygon-clipping'
 import type { Vec } from '../model/types'
 
 export const add = (a: Vec, b: Vec): Vec => ({ x: a.x + b.x, y: a.y + b.y })
@@ -439,6 +440,20 @@ export function splitPolygon(pts: Vec[], cut: Vec[], eps = 1e-6): [Vec[], Vec[]]
   if (Math.abs(area(a) + area(b) - total) > total * 1e-6 + eps) return null
   if (area(a) < eps || area(b) < eps) return null
   return [a, b]
+}
+
+/**
+ * The parts of polygon `pts` that none of `others` cover, or null if what's
+ * left would have a hole (i.e. it surrounds one of them).
+ */
+export function subtractPolygons(pts: Vec[], others: Vec[][], eps = 1e-6): Vec[][] | null {
+  if (!others.length) return [pts]
+  const ring = (q: Vec[]): Pair[] => q.map((v) => [v.x, v.y])
+  const out = polygonClipping.difference([ring(pts)], ...others.map((q) => [ring(q)]))
+  // rings come back closed (last point repeats the first)
+  const toPts = (r: Pair[]) => r.slice(0, -1).map(([x, y]) => ({ x, y }))
+  if (out.some(([, ...holes]) => holes.some((h) => area(toPts(h)) > eps))) return null
+  return out.map(([outer]) => toPts(outer))
 }
 
 export function fmtLen(m: number): string {

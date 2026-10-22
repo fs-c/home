@@ -86,7 +86,7 @@ export function PlanSettings({
         <Section title="Rooms" right={floor.rooms.length > 0 && <span className="text-xs text-stone-500">{fmtArea(total)}</span>}>
           {floor.rooms.length === 0 ? (
             <p className="text-sm text-stone-500">
-              Draw rooms as <b>rectangles</b> or <b>polygons</b>. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones. Or trace the whole outline first, then cut it into rooms with <b>split</b>.
+              <b>Draw</b> rooms corner by corner. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones. Or trace the whole outline first, then split it into rooms by drawing across it from wall to wall.
             </p>
           ) : (
             <ul className="-mx-2">

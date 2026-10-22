@@ -3,24 +3,19 @@ import { Kbd } from './ui'
 
 export const TOOLS: { id: Tool; label: string; key: string; icon: string }[] = [
   { id: 'select', label: 'Select', key: 'V', icon: '↖\uFE0E' },
-  { id: 'rect', label: 'Rectangle', key: 'R', icon: '▭' },
-  { id: 'polygon', label: 'Polygon', key: 'P', icon: '⬠' },
-  { id: 'split', label: 'Split', key: 'X', icon: '✂\uFE0E' },
+  { id: 'polygon', label: 'Draw', key: 'D', icon: '⬠' },
   { id: 'calibrate', label: 'Scale', key: 'S', icon: '↔\uFE0E' },
 ]
 
 const HINTS: Record<Tool, string> = {
   select: 'Select a room to edit it: drag its corners or walls, ◦ on a wall adds a corner',
-  rect: 'Place both ends of one wall, then set the depth',
-  polygon: 'Place the corners, then close on the first corner or use Finish',
-  split: 'Start on a wall, add bends inside the room, end on the opposite wall',
+  polygon: 'Place the corners, then close on the first one · draw across a room, wall to wall, to split it',
   calibrate: 'Place both ends of a dimension you know, e.g. a labelled wall',
 }
 
 const KEY_HINTS: Partial<Record<Tool, string>> = {
   select: 'Double-click a corner to remove it · Del removes the room',
   polygon: 'Type a number + ⏎ for an exact wall length · ⌫ removes the last corner',
-  split: '⌫ removes the last point',
 }
 
 export function ToolHint({ tool }: { tool: Tool }) {

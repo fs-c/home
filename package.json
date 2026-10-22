@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "pdfjs-dist": "^6.4.299",
+    "polygon-clipping": "0.15.7",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

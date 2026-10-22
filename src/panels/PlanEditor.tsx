@@ -32,7 +32,7 @@ export function PlanEditor({
   onDone: () => void
 }) {
   const bd = floor.backdrop
-  const [tool, setTool] = useState<Tool>(() => (floor.rooms.length ? 'select' : bd && !bd.calibrated ? 'calibrate' : 'rect'))
+  const [tool, setTool] = useState<Tool>(() => (floor.rooms.length ? 'select' : bd && !bd.calibrated ? 'calibrate' : 'polygon'))
   const [snap, setSnap] = useState<SnapSettings>({ enabled: true, angles: true })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [drawWithoutPlan, setDrawWithoutPlan] = useState(false)
@@ -95,9 +95,9 @@ export function PlanEditor({
       rooms: fl.rooms.map((r) => ({ ...r, points: r.points.map(mapPt) })),
     }))
     setCalibration(null)
-    setTool('rect')
+    setTool('polygon')
     refit([...calibration.map(mapPt), ...floor.rooms.flatMap((r) => r.points.map(mapPt))])
-    onMessage('Scale set. Next: draw rooms, or trace the outline and split it into rooms.')
+    onMessage('Scale set. Next: draw rooms, or trace the outline and draw across it to split it into rooms.')
   }
 
   const addFloor = () => {
