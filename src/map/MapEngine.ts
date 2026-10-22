@@ -573,7 +573,8 @@ export class MapEngine {
     const staticTerms = (it: Item, p: Pt) => {
       const r = boxOf(p, it.l)
       return {
-        dist: Math.hypot(p.x - it.a.x, p.y - it.a.y),
+        // the visible leader: from the dot to the nearest edge of the label
+        dist: Math.hypot(Math.max(r.x0 - it.a.x, 0, it.a.x - r.x1), Math.max(r.y0 - it.a.y, 0, it.a.y - r.y1)),
         coverRoom: polys.some((poly) => rectHitsPoly(r, poly)) ? W.coverRoom : 0,
         lineRoom: W.lineRoom * items.filter((o) => o !== it && segHitsPoly(it.a, p, o.poly)).length,
       }
@@ -604,7 +605,7 @@ export class MapEngine {
         for (let x = x0; x <= x1; x += 10) spots.push({ x, y: y0 }, { x, y: y1 })
         for (let y = y0; y <= y1; y += 10) spots.push({ x: x0, y }, { x: x1, y })
       } else {
-        for (let r = 28; r <= 260; r += 10) {
+        for (let r = 4; r <= 204; r += 8) {
           for (let k = 0; k < 24; k++) {
             const ang = (k * Math.PI) / 12
             // keep the label's near edge, not just its centre, at distance r
