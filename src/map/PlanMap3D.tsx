@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { Floor, Room } from '../model/types'
 import { MapEngine, type ViewState } from './MapEngine'
+import type { ScrollProgress } from './scrollProgress'
 import type { MapSettings } from './settings'
 
 /** The floor as a tilted 3D model; tapping a room selects it. */
@@ -15,7 +16,7 @@ export function PlanMap3D({
   openTodoCount: (room: Room) => number
   settings: MapSettings
   /** 0 when the page is at its top, 1 once the map has collapsed completely; drives the tilt. */
-  scroll: number
+  scroll: ScrollProgress
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const labelsRef = useRef<HTMLDivElement>(null)
@@ -26,7 +27,8 @@ export function PlanMap3D({
 
   const openCounts = Object.fromEntries(floor.rooms.map((r) => [r.id, openTodoCount(r)]))
   const countsKey = JSON.stringify(openCounts)
-  const pitch = settings.fixPitch ? settings.fixedPitch : settings.pitchMin + (settings.pitchMax - settings.pitchMin) * scroll
+  const { fixPitch, fixedPitch, pitchMin, pitchMax } = settings
+  const pitchAt = (p: number) => (fixPitch ? fixedPitch : pitchMin + (pitchMax - pitchMin) * p)
 
   useLayoutEffect(() => {
     const engine = new MapEngine(hostRef.current!, labelsRef.current!, {
@@ -40,9 +42,13 @@ export function PlanMap3D({
     }
   }, [])
 
+  // the scroll position goes straight to the engine, without a React render per scroll event
   useLayoutEffect(() => {
-    engineRef.current!.setPitch(pitch)
-  }, [pitch])
+    const apply = () => engineRef.current!.setPitch(pitchAt(scroll.value))
+    apply()
+    return scroll.subscribe(apply)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scroll, fixPitch, fixedPitch, pitchMin, pitchMax])
 
   useLayoutEffect(() => {
     engineRef.current!.setData({

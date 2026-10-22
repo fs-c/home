@@ -113,6 +113,8 @@ export class MapEngine {
   private bbox = { minX: 0, maxX: 1, minZ: 0, maxZ: 1 }
   private size = { w: 0, h: 0 }
   private raf = 0
+  private sunKey = ''
+  private lastView: ViewState | null = null
   private ro: ResizeObserver
 
   // camera state: it looks at `target` from `dist` away, `pitch` off the vertical and turned by `yaw`
@@ -134,6 +136,8 @@ export class MapEngine {
     this.renderer.toneMapping = THREE.NeutralToneMapping
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = THREE.PCFShadowMap
+    // the shadow map is re-rendered only when the scene or the sun changes, not on every camera move
+    this.renderer.shadowMap.autoUpdate = false
     const canvas = this.renderer.domElement
     canvas.style.cssText = 'display:block;touch-action:none;user-select:none'
     host.append(canvas)
@@ -249,6 +253,7 @@ export class MapEngine {
     const d = this.data!
     const s = d.settings
     this.clear()
+    this.renderer.shadowMap.needsUpdate = true
     const rooms = d.floor.rooms
     const selecting = d.selectedId !== null
     const shadows = s.shadows
@@ -366,6 +371,11 @@ export class MapEngine {
     const r = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 1
     const az = (s.sunAzimuth - (s.sunFollowsCamera ? this.yaw / RAD : 0)) * RAD
     const el = s.sunElevation * RAD
+    const key = [cx, cz, r, az, el].join()
+    if (key !== this.sunKey) {
+      this.sunKey = key
+      this.renderer.shadowMap.needsUpdate = true
+    }
     this.sun.position.set(cx + Math.sin(az) * Math.cos(el) * r * 3, Math.sin(el) * r * 3, cz - Math.cos(az) * Math.cos(el) * r * 3)
     this.sun.target.position.set(cx, 0, cz)
     this.sun.target.updateMatrixWorld()
@@ -386,7 +396,9 @@ export class MapEngine {
     this.camera.updateMatrixWorld()
     const rotated = Math.abs(Math.atan2(Math.sin(y), Math.cos(y))) > 1e-3
     this.controlCount = (rotated ? 1 : 0) + (this.autoFit ? 0 : 1) // the buttons PlanMap3D shows
-    if (notify) this.cb.onView({ rotated, fitted: this.autoFit })
+    if (notify && (rotated !== this.lastView?.rotated || this.autoFit !== this.lastView?.fitted)) {
+      this.cb.onView((this.lastView = { rotated, fitted: this.autoFit }))
+    }
   }
 
   /** The point of the floor under a screen position. */
@@ -498,6 +510,8 @@ export class MapEngine {
       if (this.autoFit) this.fit()
       else this.apply()
       this.draw() // right away: a resized canvas is blank until redrawn
+      cancelAnimationFrame(this.raf) // ...which makes a pending frame redundant
+      this.raf = 0
     }
   }
 

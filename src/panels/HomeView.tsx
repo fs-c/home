@@ -1,12 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { MapSettingsPanel } from '../map/MapSettingsPanel'
 import { PlanMap3D } from '../map/PlanMap3D'
+import { createScrollProgress, type ScrollProgress } from '../map/scrollProgress'
 import { useMapSettings } from '../map/settings'
 import type { Floor, HomeDoc, Item, Room } from '../model/types'
 import { AddItemBar, Overview, RoomDetail, openTodos } from './RoomContent'
 import { Button, FloorTabs, Menu } from './ui'
 
 const openTodoCount = (r: Room) => openTodos(r).length
+
+/** The progress of a map that is always fully shown (the side-by-side layout). */
+const fullyScrolled: ScrollProgress = { value: 1, subscribe: () => () => {} }
 
 /** The everyday view: room contents first, with the plan as a map for orientation. */
 export function HomeView({
@@ -33,7 +37,7 @@ export function HomeView({
     changeRoom(room.id, (r) => ({ ...r, items: r.items.map((i) => (i.id === item.id ? { ...i, done: !i.done } : i)) }))
 
   /** `scroll`: how far the page is scrolled over the map, from 0 to 1. */
-  const map = hasRooms && ((scroll: number) => (
+  const map = hasRooms && ((scroll: ScrollProgress) => (
     <div className="relative h-full">
       <PlanMap3D
         floor={floor}
@@ -103,7 +107,7 @@ export function HomeView({
 
       {wide ? (
         <div className="flex min-h-0 flex-1">
-          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(1)}</section>}
+          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(fullyScrolled)}</section>}
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto bg-stone-50">{content}</div>
             {addBar}
@@ -124,11 +128,11 @@ export function HomeView({
  * The map sits on top of the scrolling content and shrinks as the content
  * scrolls up underneath it, down to a minimum height.
  */
-function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: number) => ReactNode); resetKey: unknown; children: ReactNode }) {
+function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: ScrollProgress) => ReactNode); resetKey: unknown; children: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(0)
-  const [progress, setProgress] = useState(0)
+  const [progress] = useState(createScrollProgress)
   const max = Math.round(height * 0.5)
   const min = Math.min(140, max)
 
@@ -143,7 +147,7 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: num
   const resize = () => {
     const top = scrollRef.current!.scrollTop
     if (mapRef.current) mapRef.current.style.height = `${Math.max(min, max - top)}px`
-    setProgress(max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1)
+    progress.set(max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1)
   }
   useLayoutEffect(resize, [max, min, !!map])
 
