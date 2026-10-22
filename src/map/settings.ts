@@ -120,9 +120,26 @@ export const SETTING_GROUPS: { title: string; numbers?: Num[]; colors?: Color[];
 
 const KEY = 'home-hub:map-settings:v1'
 
+/** Keeps only stored values that match the type of the default, with numbers clamped to their slider range. */
+function sanitize(raw: unknown): MapSettings {
+  const out: Record<string, unknown> = { ...DEFAULT_MAP_SETTINGS }
+  const stored = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const ranges = new Map(SETTING_GROUPS.flatMap((g) => g.numbers ?? []).map((n) => [n.key, n]))
+  for (const [k, def] of Object.entries(DEFAULT_MAP_SETTINGS)) {
+    const v = stored[k]
+    if (typeof v !== typeof def) continue
+    if (typeof v === 'number') {
+      const r = ranges.get(k as keyof MapSettings)
+      if (!Number.isFinite(v)) continue
+      out[k] = r ? Math.min(r.max, Math.max(r.min, v)) : v
+    } else out[k] = v
+  }
+  return out as unknown as MapSettings
+}
+
 function load(): MapSettings {
   try {
-    return { ...DEFAULT_MAP_SETTINGS, ...JSON.parse(localStorage.getItem(KEY) ?? '{}') }
+    return sanitize(JSON.parse(localStorage.getItem(KEY) ?? '{}'))
   } catch {
     return DEFAULT_MAP_SETTINGS
   }
