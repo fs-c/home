@@ -6,7 +6,9 @@ import type { HomeDoc, Room } from './model/types'
 import { useHistory } from './model/useHistory'
 import { HomeView } from './panels/HomeView'
 import { PlanEditor } from './panels/PlanEditor'
+import { ShareDialog } from './panels/ShareDialog'
 import { ConfirmDialog } from './panels/ui'
+import { parseInvite, useSync } from './sync/useSync'
 
 export default function App() {
   const history = useHistory<HomeDoc>(() => loadDoc() ?? newDoc())
@@ -19,6 +21,9 @@ export default function App() {
   const imageUrls = useImageUrls(doc)
   const importRef = useRef<HTMLInputElement>(null)
   const [confirmReset, setConfirmReset] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const [invite, setInvite] = useState(() => parseInvite(location.hash))
+  const sync = useSync(doc, (next) => history.replace(() => next))
 
   // ---------- persistence ----------
 
@@ -61,9 +66,22 @@ export default function App() {
     URL.revokeObjectURL(a.href)
   }
 
+  const closeInvite = () => {
+    setInvite(null)
+    window.history.replaceState(null, '', location.pathname)
+  }
+
+  const acceptInvite = () => {
+    if (!invite) return
+    sync.join(invite)
+    setMessage('Joined the shared home.')
+    closeInvite()
+  }
+
   const doImport = async (file: File) => {
     try {
       const next = await importDoc(file)
+      sync.stop()
       history.reset(next)
       setFloorId(next.floors[0].id)
       setSelectedId(null)
@@ -74,6 +92,7 @@ export default function App() {
   }
 
   const doReset = () => {
+    sync.stop()
     const next = newDoc()
     history.reset(next)
     setFloorId(next.floors[0].id)
@@ -132,6 +151,7 @@ export default function App() {
           onEditPlan={() => setView('plan')}
           menu={[
             { label: 'Rename…', onClick: renameHome },
+            { label: sync.state ? 'Sharing…' : 'Share…', onClick: () => setSharing(true) },
             { label: 'Import backup…', onClick: () => importRef.current?.click() },
             { label: 'Export backup', onClick: () => void doExport() },
             { label: 'Reset…', onClick: () => setConfirmReset(true) },
@@ -146,6 +166,24 @@ export default function App() {
           e.target.value = ''
         }}
       />
+      {sharing && (
+        <ShareDialog
+          state={sync.state}
+          status={sync.status}
+          onStart={sync.start}
+          onStop={() => {
+            sync.stop()
+            setSharing(false)
+          }}
+          onClose={() => setSharing(false)}
+        />
+      )}
+      {invite && (
+        <ConfirmDialog title="Join shared home?" confirmLabel="Join" onConfirm={acceptInvite} onCancel={closeInvite}>
+          This replaces everything on this device with the shared home. Export a backup first if you want to keep
+          what's here.
+        </ConfirmDialog>
+      )}
       {confirmReset && (
         <ConfirmDialog
           title="Reset everything?"
@@ -155,7 +193,8 @@ export default function App() {
           onCancel={() => setConfirmReset(false)}
         >
           All floors, rooms, notes and uploaded plans will be deleted from this device. This can't be undone, so
-          export a backup first if you might want them back.
+          export a backup first if you might want them back. If this home is shared, you'll leave it; the others
+          keep their copy.
         </ConfirmDialog>
       )}
       {message && (
