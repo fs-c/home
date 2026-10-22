@@ -8,6 +8,9 @@ const NO_FIT = { n: 0 }
 const SNAP = { enabled: false, angles: false }
 const noop = () => {}
 const openTodoCount = (r: Room) => openTodos(r).length
+/** Camera tilt of the map: nearly top-down at rest, leaning back as the content scrolls over it. */
+const PITCH_MIN = (20 * Math.PI) / 180
+const PITCH_MAX = (55 * Math.PI) / 180
 
 /** The everyday view: room contents first, with the plan as a map for orientation. */
 export function HomeView({
@@ -31,9 +34,10 @@ export function HomeView({
   const toggle = (room: Room, item: Item) =>
     changeRoom(room.id, (r) => ({ ...r, items: r.items.map((i) => (i.id === item.id ? { ...i, done: !i.done } : i)) }))
 
-  const map = hasRooms && (
+  const map = hasRooms && ((pitch: number) => (
     <div className="relative h-full">
       <PlanCanvas
+        pitch={pitch}
         floor={floor}
         imageUrl={imageUrl}
         mode="home"
@@ -60,7 +64,7 @@ export function HomeView({
         </button>
       )}
     </div>
-  )
+  ))
 
   const content = (
     <div className="mx-auto max-w-2xl">
@@ -109,7 +113,7 @@ export function HomeView({
 
       {wide ? (
         <div className="flex min-h-0 flex-1">
-          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map}</section>}
+          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(PITCH_MAX)}</section>}
           <section className="flex min-h-0 flex-1 flex-col">
             <div className="min-h-0 flex-1 overflow-y-auto bg-stone-50">{content}</div>
             {addBar}
@@ -129,10 +133,11 @@ export function HomeView({
  * The map sits on top of the scrolling content and shrinks as the content
  * scrolls up underneath it, down to a minimum height.
  */
-function CollapsingMap({ map, resetKey, children }: { map: ReactNode; resetKey: unknown; children: ReactNode }) {
+function CollapsingMap({ map, resetKey, children }: { map: false | ((pitch: number) => ReactNode); resetKey: unknown; children: ReactNode }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(0)
+  const [pitch, setPitch] = useState(PITCH_MIN)
   const max = Math.round(height * 0.5)
   const min = Math.min(140, max)
 
@@ -145,9 +150,12 @@ function CollapsingMap({ map, resetKey, children }: { map: ReactNode; resetKey: 
   }, [])
 
   const resize = () => {
-    if (mapRef.current) mapRef.current.style.height = `${Math.max(min, max - scrollRef.current!.scrollTop)}px`
+    const top = scrollRef.current!.scrollTop
+    if (mapRef.current) mapRef.current.style.height = `${Math.max(min, max - top)}px`
+    const progress = max > min ? Math.min(1, Math.max(0, top / (max - min))) : 1
+    setPitch(PITCH_MIN + (PITCH_MAX - PITCH_MIN) * progress)
   }
-  useLayoutEffect(resize, [max, min, map])
+  useLayoutEffect(resize, [max, min, !!map])
 
   // Opening a room while the map is collapsed shows the room from its top.
   useEffect(() => {
@@ -171,7 +179,7 @@ function CollapsingMap({ map, resetKey, children }: { map: ReactNode; resetKey: 
       </div>
       {map && (
         <div ref={mapRef} className="absolute inset-x-0 top-0 z-20 border-b border-stone-200 bg-stone-100 shadow-sm">
-          {map}
+          {map(pitch)}
         </div>
       )}
     </div>

@@ -72,7 +72,12 @@ interface Props {
   replace: (fn: (f: Floor) => Floor) => void
   checkpoint: () => void
   openTodoCount: (room: Room) => number
+  /** Camera tilt (radians) outside the editor: 0 looks straight down, larger shows half-height walls. */
+  pitch?: number
 }
+
+/** Wall height (m) of the tilted home view. */
+const WALL_H = 0.7
 
 const DRAG_THRESHOLD = 3
 /** Smallest area (m²) a drawn shape needs to become a room. */
@@ -97,6 +102,9 @@ export function PlanCanvas(props: Props) {
   const spaceDown = useRef(false)
 
   const editing = mode === 'plan'
+  const pitch = editing ? 0 : props.pitch ?? 0
+  const pc = Math.cos(pitch)
+  const ps = Math.sin(pitch)
   /** The ends of the scale line placed so far. */
   const calibPts: Vec[] = props.pendingCalibration ?? (calibStart ? [calibStart] : [])
   const selected = floor.rooms.find((r) => r.id === selectedId) ?? null
@@ -136,7 +144,11 @@ export function PlanCanvas(props: Props) {
     // fit the plan as it appears on screen, i.e. rotated with the view
     const b = bounds(pts.map((p) => rotate(p, r)))
     const pad = editing ? 48 : 12
-    const k = Math.min((size.w - pad * 2) / Math.max(b.maxX - b.minX, 0.5), (size.h - pad * 2) / Math.max(b.maxY - b.minY, 0.5))
+    // a tilted view squashes the plan vertically and adds the walls' height on top
+    const k = Math.min(
+      (size.w - pad * 2) / Math.max(b.maxX - b.minX, 0.5),
+      (size.h - pad * 2) / (Math.max(b.maxY - b.minY, 0.5) * pc + (focus ? 0 : WALL_H * ps)),
+    )
     return { ...toScreenFit(b, k), r }
   }
 
@@ -144,7 +156,8 @@ export function PlanCanvas(props: Props) {
   const toScreenFit = (b: ReturnType<typeof bounds>, k: number) => ({
     k,
     tx: (size.w - (b.maxX - b.minX) * k) / 2 - b.minX * k,
-    ty: (size.h - (b.maxY - b.minY) * k) / 2 - b.minY * k,
+    // the tilt is about the canvas middle; push the plan down to make room for the walls above it
+    ty: size.h / 2 + (WALL_H * k * ps) / (2 * pc) - ((b.minY + b.maxY) / 2) * k,
   })
 
   /** Whether the view is still the automatic fit (the user hasn't panned or zoomed since). */
@@ -165,7 +178,7 @@ export function PlanCanvas(props: Props) {
   // e.g. the map shrinking while scrolling: stay fitted unless the user has moved the view
   useEffect(() => {
     if (autoFit.current) fitRef.current()
-  }, [size.w, size.h])
+  }, [size.w, size.h, pitch])
 
   const fitted = computeFit()
   const isFitted = !fitted || (Math.abs(view.k / fitted.k - 1) < 0.01 && Math.abs(view.tx - fitted.tx) < 2 && Math.abs(view.ty - fitted.ty) < 2)
@@ -197,9 +210,14 @@ export function PlanCanvas(props: Props) {
 
   const toWorld = (clientX: number, clientY: number): Vec => {
     const r = svgRef.current!.getBoundingClientRect()
-    return rotate({ x: (clientX - r.left - view.tx) / view.k, y: (clientY - r.top - view.ty) / view.k }, -view.r)
+    const y = size.h / 2 + (clientY - r.top - size.h / 2) / pc
+    return rotate({ x: (clientX - r.left - view.tx) / view.k, y: (y - view.ty) / view.k }, -view.r)
   }
-  const toScreen = (p: Vec) => toScreenOf(view, p)
+  /** World → canvas pixels, including the camera tilt (floor level). */
+  const toScreen = (p: Vec) => {
+    const q = toScreenOf(view, p)
+    return { x: q.x, y: size.h / 2 + (q.y - size.h / 2) * pc }
+  }
 
   const rotated = Math.abs(wrapAngle(view.r)) > 1e-6
   /** Turn the view back to north-up, around the middle of the canvas. */
@@ -648,7 +666,9 @@ export function PlanCanvas(props: Props) {
   const showHandles = editing && tool === 'select' && selected
   const drawing = editing && tool !== 'select'
 
-  const roomEls = floor.rooms.map((room) => {
+  const floorEls: ReactNode[] = []
+  const labelEls: ReactNode[] = []
+  floor.rooms.forEach((room) => {
     const isSel = room.id === selectedId
     const isHover = hover?.endsWith(room.id)
     const lp = S(labelPoint(room.points))
@@ -656,20 +676,25 @@ export function PlanCanvas(props: Props) {
     // the small map outside the editor has no room for labels of small rooms
     const rb = bounds(room.points.map(S))
     const showName = editing || (rb.maxX - rb.minX > room.name.length * 7 + 8 && rb.maxY - rb.minY > 40)
+    // with walls, labels float at half wall height
+    if (pitch > 0) lp.y -= (WALL_H * k * ps) / 2
     const badgeY = showName ? lp.y + 14 : lp.y
-    return (
+    floorEls.push(
+      <polygon
+        key={room.id}
+        data-hit={`room:${room.id}`}
+        points={pointsAttr(room.points)}
+        fill={room.color}
+        // outside the editor, rooms with open TODOs stand out as hot spots
+        fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.85 : (open ? 0.6 : 0.2) + (isHover ? 0.15 : 0)}
+        stroke={isSel ? '#2563eb' : editing ? '#44403c' : '#78716c'}
+        strokeWidth={isSel ? 2.5 : editing ? 1.25 : 1.5}
+        strokeLinejoin="round"
+        className={drawing ? 'pointer-events-none' : 'cursor-pointer'}
+      />,
+    )
+    labelEls.push(
       <g key={room.id}>
-        <polygon
-          data-hit={`room:${room.id}`}
-          points={pointsAttr(room.points)}
-          fill={room.color}
-          // outside the editor, rooms with open TODOs stand out as hot spots
-          fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.85 : (open ? 0.6 : 0.2) + (isHover ? 0.15 : 0)}
-          stroke={isSel ? '#2563eb' : editing ? '#44403c' : '#78716c'}
-          strokeWidth={isSel ? 2.5 : editing ? 1.25 : 1.5}
-          strokeLinejoin="round"
-          className={drawing ? 'pointer-events-none' : 'cursor-pointer'}
-        />
         {showName && <text
           x={lp.x}
           y={lp.y}
@@ -696,9 +721,41 @@ export function PlanCanvas(props: Props) {
             </text>
           </g>
         )}
-      </g>
+      </g>,
     )
   })
+
+  // Half-height walls on every room edge, painted back to front (by the edge's screen height).
+  const wallH = WALL_H * k * ps
+  const wallEls =
+    pitch > 0
+      ? floor.rooms
+          .flatMap((room) =>
+            room.points.map((p, i) => {
+              const a = S(p)
+              const b = S(room.points[(i + 1) % room.points.length])
+              return { room, i, a, b, depth: a.y + b.y }
+            }),
+          )
+          .sort((u, v) => u.depth - v.depth)
+          .map(({ room, i, a, b }) => {
+            // light falls from the left: walls running steeply on screen are darker
+            const e = sub(b, a)
+            const shade = 0.55 + (0.35 * Math.abs(e.x)) / (len(e) || 1)
+            return (
+              <polygon
+                key={`${room.id}:${i}`}
+                data-hit={`room:${room.id}`}
+                points={`${a.x},${a.y} ${b.x},${b.y} ${b.x},${b.y - wallH} ${a.x},${a.y - wallH}`}
+                fill={`hsl(30 8% ${Math.round(shade * 100)}%)`}
+                stroke={room.id === selectedId ? '#2563eb' : '#57534e'}
+                strokeWidth={room.id === selectedId ? 2 : 1}
+                strokeLinejoin="round"
+                className="cursor-pointer"
+              />
+            )
+          })
+      : null
 
   let handleEls: ReactNode = null
   if (showHandles && selected) {
@@ -871,7 +928,7 @@ export function PlanCanvas(props: Props) {
         onContextMenu={(e) => e.preventDefault()}
       >
         {bd && props.imageUrl && props.showBackdrop && (
-          <g transform={`translate(${view.tx} ${view.ty}) rotate(${(view.r * 180) / Math.PI}) scale(${k})`}>
+          <g transform={`matrix(1 0 0 ${pc} 0 ${(size.h / 2) * (1 - pc)}) translate(${view.tx} ${view.ty}) rotate(${(view.r * 180) / Math.PI}) scale(${k})`}>
             <image
               href={props.imageUrl}
               x={bd.x} y={bd.y} width={bd.width * bd.scale} height={bd.height * bd.scale}
@@ -880,7 +937,9 @@ export function PlanCanvas(props: Props) {
             />
           </g>
         )}
-        {roomEls}
+        {floorEls}
+        {wallEls}
+        {labelEls}
         {handleEls}
         {guideEls}
         {draftEls}
