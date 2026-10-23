@@ -5,7 +5,8 @@ import { createScrollProgress, type ScrollProgress } from '../map/scrollProgress
 import { useMapSettings } from '../map/settings'
 import type { Floor, HomeDoc, Item, Room } from '../model/types'
 import { AddItemBar, Overview, RoomDetail, openTodos } from './RoomContent'
-import { Button, FloorTabs, Menu } from './ui'
+import { PlanImageIcon } from './icons'
+import { Button, FloorTabs, MapButton, MapControls, Menu } from './ui'
 
 const openTodoCount = (r: Room) => openTodos(r).length
 
@@ -50,12 +51,11 @@ export function HomeView({
         scroll={scroll}
       />
       {floor.backdrop && (
-        <button
-          onClick={() => setShowPlan(!showPlan)}
-          className={`absolute bottom-3 left-2 rounded-md border px-2 py-1 text-xs shadow-sm ${showPlan ? 'border-stone-800 bg-ink text-white' : 'border-line-strong bg-surface/90 text-muted'}`}
-        >
-          Original plan
-        </button>
+        <MapControls className="absolute bottom-3 left-3">
+          <MapButton label={showPlan ? 'Hide original plan' : 'Show original plan'} pressed={showPlan} onClick={() => setShowPlan(!showPlan)}>
+            <PlanImageIcon />
+          </MapButton>
+        </MapControls>
       )}
     </div>
   ))

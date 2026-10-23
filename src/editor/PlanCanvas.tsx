@@ -10,6 +10,8 @@ import { uid } from '../model/ids'
 import type { Floor, Room, Vec } from '../model/types'
 import { mainFrame, snapPoint, targetsFrom, type Guide, type SnapResult, type SnapSettings } from './snapping'
 import { backdropCorners, backdropTransform } from '../model/backdrop'
+import { CompassIcon, FitIcon, MinusIcon, PlusIcon } from '../panels/icons'
+import { MapButton, MapControls } from '../panels/ui'
 
 export type Tool = 'select' | 'polygon' | 'calibrate'
 export type Mode = 'plan' | 'home'
@@ -964,22 +966,18 @@ export function PlanCanvas(props: Props) {
         </div>
       )}
       {(editing || !isFitted || rotated) && (
-        <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-line-strong bg-surface shadow-sm">
+        <MapControls className="absolute bottom-3 right-3">
           {editing && (
             <>
-              <ZoomButton label="+" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)} />
-              <ZoomButton label="−" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)} />
+              <MapButton label="Zoom in" onClick={() => zoomAt(size.w / 2, size.h / 2, 1.25)}><PlusIcon /></MapButton>
+              <MapButton label="Zoom out" onClick={() => zoomAt(size.w / 2, size.h / 2, 0.8)}><MinusIcon /></MapButton>
             </>
           )}
           {rotated && (
-            <ZoomButton
-              label={<span className="inline-block font-semibold text-danger" style={{ transform: `rotate(${view.r}rad)` }}>↑</span>}
-              title="Reset rotation"
-              onClick={resetRotation}
-            />
+            <MapButton label="Reset rotation" onClick={resetRotation}><CompassIcon rotation={view.r} /></MapButton>
           )}
-          {!isFitted && <ZoomButton label="⤢" title="Fit to content" onClick={() => fitToContent()} />}
-        </div>
+          {!isFitted && <MapButton label="Fit to content" onClick={() => fitToContent()}><FitIcon /></MapButton>}
+        </MapControls>
       )}
       {editing && <ScaleBar k={k} />}
     </div>
@@ -1024,18 +1022,6 @@ function MeasureLabel({ a, b, toScreen, text }: { a: Vec; b: Vec; toScreen: (p: 
     >
       {text ?? fmtLen(dist(a, b))}
     </text>
-  )
-}
-
-function ZoomButton({ label, title, onClick }: { label: ReactNode; title?: string; onClick: () => void }) {
-  return (
-    <button
-      title={title}
-      onClick={onClick}
-      className="h-9 w-9 border-b border-line text-muted last:border-b-0 hover:bg-canvas"
-    >
-      {label}
-    </button>
   )
 }
 

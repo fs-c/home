@@ -53,6 +53,35 @@ export function Button({
   )
 }
 
+/** A column of icon buttons floating over a map; secondary to the map itself, so it stays quiet. */
+export function MapControls({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={`flex flex-col divide-y divide-line overflow-hidden rounded-lg bg-surface/80 shadow-sm ring-1 ring-line backdrop-blur ${className}`}>
+      {children}
+    </div>
+  )
+}
+
+/** One button of `MapControls` (or on its own). 36px square: MapEngine keeps labels clear of that size. */
+export function MapButton({
+  label, onClick, pressed, children,
+}: {
+  label: string
+  onClick: () => void
+  /** For toggles: on shows in the accent color. */
+  pressed?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      title={label} aria-label={label} aria-pressed={pressed} onClick={onClick}
+      className={`flex h-9 w-9 items-center justify-center transition-colors hover:bg-canvas ${pressed ? 'text-accent' : 'text-faint hover:text-ink-soft'}`}
+    >
+      {children}
+    </button>
+  )
+}
+
 export function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="rounded border border-line-strong bg-subtle px-1 py-px font-mono text-[10px] text-muted">

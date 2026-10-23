@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import type { Floor, Room } from '../model/types'
+import { CompassIcon, FitIcon } from '../panels/icons'
+import { MapButton, MapControls } from '../panels/ui'
 import { MapEngine, type ViewState } from './MapEngine'
 import type { ScrollProgress } from './scrollProgress'
 import type { MapSettings } from './settings'
@@ -67,18 +69,18 @@ export function PlanMap3D({
       <div ref={hostRef} className="absolute inset-0" />
       <div ref={labelsRef} className="pointer-events-none absolute inset-0 overflow-hidden" />
       {(view.rotated || !view.fitted) && (
-        <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-line-strong bg-surface/90 shadow-sm backdrop-blur">
+        <MapControls className="absolute bottom-3 right-3">
           {view.rotated && (
-            <button title="Reset rotation" onClick={() => engineRef.current?.resetRotation()} className="h-9 w-9 text-lg font-semibold text-danger hover:bg-canvas">
-              ↑
-            </button>
+            <MapButton label="Reset rotation" onClick={() => engineRef.current?.resetRotation()}>
+              <CompassIcon />
+            </MapButton>
           )}
           {!view.fitted && (
-            <button title="Fit to content" onClick={() => engineRef.current?.fit()} className="h-9 w-9 text-lg text-muted hover:bg-canvas">
-              ⤢
-            </button>
+            <MapButton label="Fit to content" onClick={() => engineRef.current?.fit()}>
+              <FitIcon />
+            </MapButton>
           )}
-        </div>
+        </MapControls>
       )}
     </div>
   )
