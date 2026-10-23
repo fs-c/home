@@ -64,7 +64,7 @@ export function PlanMap3D({
 
   return (
     <div
-      className="relative h-full w-full overflow-hidden bg-[radial-gradient(ellipse_at_50%_40%,var(--color-map-ground),var(--color-map-ground-edge))]"
+      className="relative h-full w-full overflow-hidden bg-[radial-gradient(ellipse_at_50%_40%,var(--color-stone-100),var(--color-stone-300))]"
     >
       <div ref={hostRef} className="absolute inset-0" />
       <div ref={labelsRef} className="pointer-events-none absolute inset-0 overflow-hidden" />

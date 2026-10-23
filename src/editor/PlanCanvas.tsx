@@ -689,7 +689,7 @@ export function PlanCanvas(props: Props) {
         fill={room.color}
         // outside the editor, rooms with open TODOs stand out as hot spots
         fillOpacity={editing ? (isSel ? 0.5 : 0.35) : isSel ? 0.85 : (open ? 0.6 : 0.2) + (isHover ? 0.15 : 0)}
-        stroke={isSel ? 'var(--color-accent)' : editing ? '#44403c' : '#78716c'}
+        stroke={isSel ? '#2563eb' : editing ? '#44403c' : '#78716c'}
         strokeWidth={isSel ? 2.5 : editing ? 1.25 : 1.5}
         strokeLinejoin="round"
         className={drawing ? 'pointer-events-none' : 'cursor-pointer'}
@@ -750,7 +750,7 @@ export function PlanCanvas(props: Props) {
                 data-hit={`room:${room.id}`}
                 points={`${a.x},${a.y} ${b.x},${b.y} ${b.x},${b.y - wallH} ${a.x},${a.y - wallH}`}
                 fill={`hsl(30 8% ${Math.round(shade * 100)}%)`}
-                stroke={room.id === selectedId ? 'var(--color-accent)' : '#57534e'}
+                stroke={room.id === selectedId ? '#2563eb' : '#57534e'}
                 strokeWidth={room.id === selectedId ? 2 : 1}
                 strokeLinejoin="round"
                 className="cursor-pointer"
@@ -784,7 +784,7 @@ export function PlanCanvas(props: Props) {
               />
               <text
                 x={lpos.x} y={lpos.y} fontSize={11} textAnchor="middle" dominantBaseline="middle"
-                className="pointer-events-none select-none fill-accent-strong"
+                className="pointer-events-none select-none fill-blue-700"
                 style={{ paintOrder: 'stroke', stroke: 'white', strokeWidth: 3 }}
               >
                 {fmtLen(l / k)}
@@ -805,7 +805,7 @@ export function PlanCanvas(props: Props) {
             <circle cx={p.x} cy={p.y} r={16} fill="transparent" />
             <circle
               cx={p.x} cy={p.y} r={i === activeVertex ? 8 : 6}
-              className={i === activeVertex ? 'fill-accent stroke-white' : 'fill-white stroke-accent'}
+              className={i === activeVertex ? 'fill-blue-600 stroke-white' : 'fill-white stroke-blue-600'}
               strokeWidth={2}
             />
           </g>
@@ -848,7 +848,7 @@ export function PlanCanvas(props: Props) {
         )}
         <polyline points={pointsAttr(pts)} fill="none" stroke="#2563eb" strokeWidth={2} />
         {draft.map(S).map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={i === 0 ? 6 : 4} className={i === 0 ? 'fill-accent' : 'fill-white stroke-accent'} strokeWidth={1.5} />
+          <circle key={i} cx={p.x} cy={p.y} r={i === 0 ? 6 : 4} className={i === 0 ? 'fill-blue-600' : 'fill-white stroke-blue-600'} strokeWidth={1.5} />
         ))}
         {cp && <MeasureLabel a={last} b={cp} toScreen={S} text={lengthInput ? `${lengthInput} m ⏎` : undefined} />}
       </g>
@@ -892,7 +892,7 @@ export function PlanCanvas(props: Props) {
         ) : cursor.kind === 'edge' ? (
           <path d={`M${c.x - 6},${c.y + 5} L${c.x},${c.y - 6} L${c.x + 6},${c.y + 5} Z`} fill="none" stroke="#0891b2" strokeWidth={2} />
         ) : calibDragging ? null : (
-          <circle cx={c.x} cy={c.y} r={3.5} fill={cursor.kind === 'none' ? 'var(--color-accent)' : '#0891b2'} />
+          <circle cx={c.x} cy={c.y} r={3.5} fill={cursor.kind === 'none' ? '#2563eb' : '#0891b2'} />
         )}
       </g>
     )
@@ -951,13 +951,13 @@ export function PlanCanvas(props: Props) {
 
       {actions.length > 0 && (
         <div className="absolute inset-x-0 bottom-14 flex justify-center px-3">
-          <div className="flex gap-1 rounded-xl border border-line-strong bg-surface p-1 shadow-md">
+          <div className="flex gap-1 rounded-xl border border-stone-300 bg-white p-1 shadow-md">
             {actions.map((a) => (
               <button
                 key={a.label}
                 onClick={a.onClick}
                 disabled={a.disabled}
-                className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40 ${a.primary ? 'bg-accent text-white' : 'text-ink-soft hover:bg-canvas'}`}
+                className={`rounded-lg px-3 py-2 text-sm font-medium disabled:opacity-40 ${a.primary ? 'bg-blue-600 text-white' : 'text-stone-700 hover:bg-stone-100'}`}
               >
                 {a.label}
               </button>
@@ -1030,7 +1030,7 @@ function ScaleBar({ k }: { k: number }) {
   const nice = [0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 50, 100]
   const m = nice.find((n) => n * k >= 60) ?? 100
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 text-[11px] text-muted">
+    <div className="pointer-events-none absolute bottom-3 left-3 text-[11px] text-stone-600">
       <div className="h-1.5 border-x-2 border-b-2 border-stone-600" style={{ width: m * k }} />
       <div className="mt-0.5">{m < 1 ? `${m * 100} cm` : `${m} m`}</div>
     </div>

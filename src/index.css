@@ -1,33 +1,4 @@
 @import "tailwindcss";
 
-/*
- * Semantic color tokens: the single place to restyle the app. Components use these (`bg-surface`,
- * `text-muted`, …) or `var(--color-surface)` outside of classes, rather than raw palette colors.
- */
-@theme {
-  /* backgrounds */
-  --color-surface: var(--color-white);
-  --color-subtle: var(--color-stone-50);
-  --color-canvas: var(--color-stone-100);
-  --color-sunken: var(--color-stone-200);
-  /* borders */
-  --color-line: var(--color-stone-200);
-  --color-line-strong: var(--color-stone-300);
-  /* text, strongest to weakest */
-  --color-ink: var(--color-stone-800);
-  --color-ink-soft: var(--color-stone-700);
-  --color-muted: var(--color-stone-600);
-  --color-faint: var(--color-stone-500);
-  --color-ghost: var(--color-stone-400);
-  /* interactive / status */
-  --color-accent: var(--color-blue-600);
-  --color-accent-strong: var(--color-blue-700);
-  --color-danger: var(--color-red-600);
-  /* the 3D map */
-  --color-map-wall: var(--color-stone-100);
-  --color-map-ground: var(--color-stone-100);
-  --color-map-ground-edge: var(--color-stone-300);
-}
-
 html, body, #root { height: 100%; }
 body { overscroll-behavior: none; }

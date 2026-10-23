@@ -321,7 +321,7 @@ export class MapEngine {
 
     const wg = wallGeometry(rooms, s.wallThickness, s.wallHeight)
     if (wg) {
-      const walls = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ color: cssColor('--color-map-wall'), roughness: 0.95 }))
+      const walls = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ color: cssColor('--color-stone-100'), roughness: 0.95 }))
       walls.castShadow = walls.receiveShadow = shadows
       this.content.add(walls)
     }
@@ -370,7 +370,7 @@ export class MapEngine {
     const el = document.createElement('div')
     el.className = 'absolute left-0 top-0 will-change-transform'
     const pill = document.createElement('div')
-    pill.className = `flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 pointer-events-auto cursor-pointer font-medium leading-tight ${selected ? 'text-ink ring-2 ring-blue-500' : 'text-muted ring-1 ring-black/5'}`
+    pill.className = `flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 pointer-events-auto cursor-pointer font-medium leading-tight ${selected ? 'text-stone-800 ring-2 ring-blue-500' : 'text-stone-600 ring-1 ring-black/5'}`
     pill.style.fontSize = `${11 * s.labelSize}px`
     const name = document.createElement('span')
     name.textContent = room.name

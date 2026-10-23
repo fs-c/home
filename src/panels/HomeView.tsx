@@ -65,7 +65,7 @@ export function HomeView({
       {!hasRooms ? (
         <div className="p-6 text-center">
           <h2 className="text-lg font-semibold">{firstRun ? 'Welcome to Home Hub' : `No rooms on ${floor.name} yet`}</h2>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-faint">
+          <p className="mx-auto mt-1 max-w-sm text-sm text-stone-500">
             {firstRun
               ? 'Keep TODOs, notes and links organised by room. To start, trace the rooms of your floor plan – you only need to do this once.'
               : 'Trace the rooms of this floor to add things to them.'}
@@ -97,7 +97,7 @@ export function HomeView({
 
   return (
     <div className="flex h-dvh flex-col">
-      <header className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-1.5 pt-[max(env(safe-area-inset-top),0.375rem)]">
+      <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 bg-white px-3 py-1.5 pt-[max(env(safe-area-inset-top),0.375rem)]">
         <h1 className="shrink-0 truncate font-semibold">{doc.name}</h1>
         {doc.floors.length > 1 && <FloorTabs floors={doc.floors} current={floor.id} onSelect={onSelectFloor} />}
         <div className="ml-auto shrink-0">
@@ -107,9 +107,9 @@ export function HomeView({
 
       {wide ? (
         <div className="flex min-h-0 flex-1">
-          {map && <section className="shrink-0 basis-[45%] border-r border-line">{map(fullyScrolled)}</section>}
+          {map && <section className="shrink-0 basis-[45%] border-r border-stone-200">{map(fullyScrolled)}</section>}
           <section className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 overflow-y-auto bg-subtle">{content}</div>
+            <div className="min-h-0 flex-1 overflow-y-auto bg-stone-50">{content}</div>
             {addBar}
           </section>
         </div>
@@ -165,7 +165,7 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: Scr
       <div
         ref={scrollRef}
         onScroll={resize}
-        className="h-full overflow-y-auto bg-subtle"
+        className="h-full overflow-y-auto bg-stone-50"
         // sticky headers in the content stop below the collapsed map
         style={{ '--sticky-top': map ? `${min}px` : '0px' } as CSSProperties}
       >
@@ -175,7 +175,7 @@ function CollapsingMap({ map, resetKey, children }: { map: false | ((scroll: Scr
         <div style={{ minHeight: map ? height - min : undefined }}>{children}</div>
       </div>
       {map && (
-        <div ref={mapRef} className="absolute inset-x-0 top-0 z-20 border-b border-line bg-canvas shadow-sm">
+        <div ref={mapRef} className="absolute inset-x-0 top-0 z-20 border-b border-stone-200 bg-stone-100 shadow-sm">
           {map(progress)}
         </div>
       )}
