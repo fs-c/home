@@ -30,8 +30,11 @@ interface ScrollModel {
 /** A label layout, solved for one scroll progress: where each label sits relative to its anchor. */
 interface Keyframes {
   key: string
-  frames: { off: Pt; floating: boolean }[][]
+  /** room id per label, as `frames` are indexed by label */
+  rooms: string[]
+  frames: Frame[][]
 }
+type Frame = { off: Pt; floating: boolean }
 const KEYFRAMES = 5
 
 interface Callbacks {
@@ -133,6 +136,8 @@ export class MapEngine {
   private scrollModel: ScrollModel | null = null
   private scrollT = 0
   private keyframes: Keyframes | null = null
+  /** the last layout solved, kept after `keyframes` is invalidated so the next one can stay close to it */
+  private lastKeyframes: Keyframes | null = null
   private proj = new THREE.Vector3()
   private sunKey = ''
   private lastView: ViewState | null = null
@@ -603,6 +608,10 @@ export class MapEngine {
     const saved = {
       size: this.size, pitch: this.pitch, target: this.target.clone(), dist: this.dist, fitDist: this.fitDist, autoFit: this.autoFit,
     }
+    // re-solving (e.g. after selecting a room, which lifts it and resizes the map) shouldn't rearrange the
+    // labels: each keyframe stays close to what was shown at that scroll position before, else to the previous keyframe
+    const last = this.lastKeyframes
+    const rooms = this.labels.map((l) => l.room.id)
     const frames: Keyframes['frames'] = []
     for (let k = 0; k < KEYFRAMES; k++) {
       const t = k / (KEYFRAMES - 1)
@@ -611,7 +620,10 @@ export class MapEngine {
       this.camera.updateProjectionMatrix()
       this.pitch = pitchRad(model.pitchAt(t))
       this.fit(false)
-      frames.push(this.layoutLabels(frames[k - 1]).map((r) => ({ off: { x: r.pos.x - r.a.x, y: r.pos.y - r.a.y }, floating: r.floating })))
+      const prev = new Map<string, Frame>()
+      frames[k - 1]?.forEach((f, i) => prev.set(rooms[i], f))
+      last?.frames[k].forEach((f, i) => prev.set(last.rooms[i], f))
+      frames.push(this.layoutLabels(prev).map((r) => ({ off: { x: r.pos.x - r.a.x, y: r.pos.y - r.a.y }, floating: r.floating })))
     }
     this.size = saved.size
     this.camera.aspect = this.size.w / this.size.h
@@ -622,17 +634,17 @@ export class MapEngine {
     this.fitDist = saved.fitDist
     this.autoFit = saved.autoFit
     this.apply(false)
-    return { key, frames }
+    return (this.lastKeyframes = { key, rooms, frames })
   }
 
   /**
    * Labels that fit inside their room stay there. The others float: they are moved just outside
    * the building (or into any free spot) and tied to their room by a leader line and dot.
-   * Returns where each label goes, for the camera as it is now. `prev` is the layout of the previous
-   * keyframe: labels that floated there are penalised for moving away from where they were, so they
-   * don't jump around while interpolating.
+   * Returns where each label goes, for the camera as it is now. `prev` is a reference layout, by room
+   * id: labels that floated there are penalised for moving away from where they were, so they don't
+   * jump around.
    */
-  private layoutLabels(prev?: Keyframes['frames'][number]) {
+  private layoutLabels(prev?: Map<string, Frame>) {
     const { w, h } = this.size
     const MARGIN = 4
     const edge = this.data?.settings.floatLabels ?? false
@@ -673,13 +685,13 @@ export class MapEngine {
       lineRoom: 40, // the leader passes over a foreign room (each)
       lineLine: 120, // the leader crosses another leader (each)
       lineLabel: 300, // the leader runs through another label, or another leader through this label (each)
-      move: 1.5, // per px the label's offset from its anchor differs from the previous keyframe
+      move: 1.5, // per px the label's offset from its anchor differs from the reference layout
     }
     const inView = (r: Rect) => r.x0 >= MARGIN && r.y0 >= MARGIN && r.x1 <= w - MARGIN && r.y1 <= h - MARGIN
     type Item = (typeof items)[number]
     const fixedLabels = items.filter((i) => i.fits)
     const prevOff = (it: Item) => {
-      const f = prev?.[this.labels.indexOf(it.l)]
+      const f = prev?.get(it.l.room.id)
       return f?.floating ? f.off : null
     }
 
@@ -731,6 +743,15 @@ export class MapEngine {
             spots.push({ x: a.x + Math.cos(ang) * reach, y: a.y + Math.sin(ang) * reach })
           }
         }
+      }
+      // where the label was before, which is rarely exactly on the grid once the camera has moved a bit
+      // (and, when it hugged the screen edge, may now be a fraction of a pixel out of view)
+      const off = prevOff(it)
+      if (off) {
+        spots.push({
+          x: clamp(a.x + off.x, MARGIN + l.w / 2, w - MARGIN - l.w / 2),
+          y: clamp(a.y + off.y, MARGIN + l.h / 2, h - MARGIN - l.h / 2),
+        })
       }
       candsOf.set(
         it,
