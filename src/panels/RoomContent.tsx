@@ -32,18 +32,18 @@ export function Overview({
   const total = rooms.reduce((s, r) => s + openTodos(r).length, 0)
   return (
     <div className="space-y-2 p-3">
-      <p className="px-1 text-sm text-stone-500">
+      <p className="px-1 text-sm text-faint">
         {total ? `${total} open TODO${total > 1 ? 's' : ''}` : 'No open TODOs 🎉'}
       </p>
       {rooms.map((room) => {
         const open = openTodos(room)
         return (
-          <div key={room.id} className="rounded-xl border border-stone-200 bg-white">
+          <div key={room.id} className="rounded-xl border border-line bg-surface">
             <button onClick={() => onOpen(room.id)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
               <Swatch color={room.color} />
               <span className="flex-1 truncate font-medium">{room.name}</span>
-              <span className="text-xs text-stone-400">{summary(room)}</span>
-              <span className="text-stone-400">›</span>
+              <span className="text-xs text-ghost">{summary(room)}</span>
+              <span className="text-ghost">›</span>
             </button>
             {open.length > 0 && (
               <ul className="border-t border-stone-100 px-3 py-1">
@@ -52,7 +52,7 @@ export function Overview({
                     <input
                       type="checkbox" checked={false} onChange={() => onToggle(room, item)}
                       aria-label={`Done: ${item.text}`}
-                      className="mt-0.5 h-5 w-5 shrink-0 accent-blue-600"
+                      className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
                     />
                     <button onClick={() => onOpen(room.id)} className="min-w-0 flex-1 text-left text-sm">{item.text}</button>
                   </li>
@@ -86,22 +86,22 @@ export function RoomDetail({
 
   return (
     <div>
-      <div className="sticky top-(--sticky-top,0px) z-10 flex items-center gap-1 border-b border-stone-200 bg-white px-1 py-1.5">
-        <button onClick={onBack} className="rounded-md px-2.5 py-1.5 text-sm text-blue-700 hover:bg-stone-100">‹ All rooms</button>
+      <div className="sticky top-(--sticky-top,0px) z-10 flex items-center gap-1 border-b border-line bg-surface px-1 py-1.5">
+        <button onClick={onBack} className="rounded-md px-2.5 py-1.5 text-sm text-accent-strong hover:bg-canvas">‹ All rooms</button>
         <Swatch color={room.color} />
         <input
           value={room.name}
           onChange={(e) => onChange((r) => ({ ...r, name: e.target.value }), `name:${room.id}`)}
           aria-label="Room name"
-          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-base font-semibold hover:border-stone-300 focus:border-blue-500 focus:outline-none"
+          className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 py-1 text-base font-semibold hover:border-line-strong focus:border-blue-500 focus:outline-none"
         />
-        <span className="shrink-0 pr-2 text-xs text-stone-400">{fmtArea(area(room.points))}</span>
+        <span className="shrink-0 pr-2 text-xs text-ghost">{fmtArea(area(room.points))}</span>
       </div>
       <div className="p-3">
         <ItemGroup title="TODOs" items={todos} onUpdate={updateItem} onRemove={removeItem} />
         <ItemGroup title="Notes & links" items={others} onUpdate={updateItem} onRemove={removeItem} />
         {room.items.length === 0 && (
-          <p className="px-1 text-sm text-stone-500">Nothing here yet. Add TODOs, notes or links to things about this room (manuals, paint colours, measurements, …).</p>
+          <p className="px-1 text-sm text-faint">Nothing here yet. Add TODOs, notes or links to things about this room (manuals, paint colours, measurements, …).</p>
         )}
       </div>
     </div>
@@ -119,22 +119,22 @@ function ItemGroup({
   if (!items.length) return null
   return (
     <div className="mb-5">
-      <h3 className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-stone-500">{title}</h3>
+      <h3 className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-faint">{title}</h3>
       <ul>
         {items.map((item) => (
           <li key={item.id} className="flex items-start gap-3 rounded-md px-1 py-1.5">
             {item.kind === 'todo' ? (
               <input
                 type="checkbox" checked={!!item.done} aria-label="Done"
-                className="mt-0.5 h-5 w-5 shrink-0 accent-blue-600"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-accent"
                 onChange={(e) => onUpdate(item.id, { done: e.target.checked })}
               />
             ) : (
-              <span className="w-5 shrink-0 text-center text-sm text-stone-400">{item.kind === 'link' ? '↗\uFE0E' : '¶'}</span>
+              <span className="w-5 shrink-0 text-center text-sm text-ghost">{item.kind === 'link' ? '↗\uFE0E' : '¶'}</span>
             )}
             <div className="min-w-0 flex-1 text-base md:text-sm">
               {item.kind === 'link' && item.url ? (
-                <a href={item.url} target="_blank" rel="noreferrer" className="break-words text-blue-700 hover:underline">
+                <a href={item.url} target="_blank" rel="noreferrer" className="break-words text-accent-strong hover:underline">
                   {item.text}
                 </a>
               ) : (
@@ -142,13 +142,13 @@ function ItemGroup({
                   value={item.text}
                   rows={1}
                   onChange={(e) => onUpdate(item.id, { text: e.target.value })}
-                  className={`field-sizing-content w-full resize-none bg-transparent focus:outline-none ${item.done ? 'text-stone-400 line-through' : ''}`}
+                  className={`field-sizing-content w-full resize-none bg-transparent focus:outline-none ${item.done ? 'text-ghost line-through' : ''}`}
                 />
               )}
             </div>
             <button
               onClick={() => onRemove(item.id)}
-              className="-my-1 shrink-0 rounded px-2 py-1 text-sm text-stone-300 hover:text-red-600"
+              className="-my-1 shrink-0 rounded px-2 py-1 text-sm text-stone-300 hover:text-danger"
               aria-label="Remove"
             >
               ✕
@@ -191,24 +191,24 @@ export function AddItemBar({
         e.preventDefault()
         add()
       }}
-      className="shrink-0 border-t border-stone-200 bg-stone-50 px-3 pt-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]"
+      className="shrink-0 border-t border-line bg-subtle px-3 pt-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]"
     >
       <div className="mb-2 flex items-center gap-1">
         {(['todo', 'note', 'link'] as ItemKind[]).map((k) => (
           <button
             key={k} type="button"
             onClick={() => setKind(k)}
-            className={`rounded-full px-3 py-1 text-xs font-medium ${kind === k ? 'bg-stone-800 text-white' : 'text-stone-600 hover:bg-stone-200'}`}
+            className={`rounded-full px-3 py-1 text-xs font-medium ${kind === k ? 'bg-ink text-white' : 'text-muted hover:bg-sunken'}`}
           >
             {KIND_LABEL[k]}
           </button>
         ))}
         {!roomId && (
-          <label className="ml-auto flex min-w-0 items-center gap-1 text-xs text-stone-500">
+          <label className="ml-auto flex min-w-0 items-center gap-1 text-xs text-faint">
             in
             <select
               value={target} onChange={(e) => setPicked(e.target.value)}
-              className="min-w-0 rounded-md border border-stone-300 bg-white px-1.5 py-1 text-sm text-stone-800"
+              className="min-w-0 rounded-md border border-line-strong bg-surface px-1.5 py-1 text-sm text-ink"
             >
               {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>

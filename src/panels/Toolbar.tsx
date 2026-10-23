@@ -44,23 +44,23 @@ export function Toolbar({
 }) {
   const btn = 'flex min-w-0 flex-1 md:max-w-24 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[11px] font-medium'
   return (
-    <nav className="flex shrink-0 items-stretch justify-center gap-0.5 border-t border-stone-200 bg-white px-1 pt-1 pb-[max(env(safe-area-inset-bottom),0.25rem)]">
+    <nav className="flex shrink-0 items-stretch justify-center gap-0.5 border-t border-line bg-surface px-1 pt-1 pb-[max(env(safe-area-inset-bottom),0.25rem)]">
       {TOOLS.map((t) => (
         <button
           key={t.id}
           title={`${t.label} (${t.key})`}
           onClick={() => setTool(t.id)}
-          className={`${btn} ${tool === t.id ? 'bg-blue-600 text-white' : 'text-stone-600 hover:bg-stone-100'}`}
+          className={`${btn} ${tool === t.id ? 'bg-accent text-white' : 'text-muted hover:bg-canvas'}`}
         >
           <span className="text-lg leading-6">{t.icon}</span>
           {t.label}
         </button>
       ))}
-      <div className="mx-0.5 my-2 w-px bg-stone-200" />
-      <button title="Undo (Ctrl/⌘+Z)" disabled={!canUndo} onClick={undo} className={`${btn} text-stone-600 hover:bg-stone-100 disabled:opacity-30`}>
+      <div className="mx-0.5 my-2 w-px bg-sunken" />
+      <button title="Undo (Ctrl/⌘+Z)" disabled={!canUndo} onClick={undo} className={`${btn} text-muted hover:bg-canvas disabled:opacity-30`}>
         <span className="text-lg leading-6">↶</span>Undo
       </button>
-      <button title="Redo (Ctrl/⌘+Shift+Z)" disabled={!canRedo} onClick={redo} className={`${btn} text-stone-600 hover:bg-stone-100 disabled:opacity-30`}>
+      <button title="Redo (Ctrl/⌘+Shift+Z)" disabled={!canRedo} onClick={redo} className={`${btn} text-muted hover:bg-canvas disabled:opacity-30`}>
         <span className="text-lg leading-6">↷</span>Redo
       </button>
     </nav>

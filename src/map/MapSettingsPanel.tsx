@@ -12,7 +12,7 @@ export function MapSettingsPanel({
 }) {
   const set = <K extends keyof MapSettings>(key: K, value: MapSettings[K]) => onChange({ ...settings, [key]: value })
   return (
-    <div className="fixed inset-x-0 bottom-0 z-50 flex max-h-[48dvh] flex-col rounded-t-2xl border-t border-stone-200 bg-white/95 shadow-2xl backdrop-blur">
+    <div className="fixed inset-x-0 bottom-0 z-50 flex max-h-[48dvh] flex-col rounded-t-2xl border-t border-line bg-surface/95 shadow-2xl backdrop-blur">
       <div className="flex shrink-0 items-center gap-2 px-4 py-2">
         <h2 className="font-semibold">Map settings</h2>
         <Button className="ml-auto" onClick={() => navigator.clipboard?.writeText(JSON.stringify(settings, null, 2))}>
@@ -27,7 +27,7 @@ export function MapSettingsPanel({
       <div className="space-y-4 overflow-y-auto px-4 pb-6 pt-1 pb-[max(env(safe-area-inset-bottom),1.5rem)]">
         {SETTING_GROUPS.map((g) => (
           <section key={g.title} className="space-y-1.5">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-stone-400">{g.title}</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ghost">{g.title}</h3>
             {g.bools?.map((b) => (
               <Check key={b.key} label={b.label} checked={settings[b.key] as boolean} onChange={(v) => set(b.key, v as never)} />
             ))}

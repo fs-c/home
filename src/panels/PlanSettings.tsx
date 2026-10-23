@@ -29,10 +29,10 @@ export function PlanSettings({
   return (
     <>
       <div className="absolute inset-0 z-20 bg-stone-900/20 md:hidden" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 z-20 max-h-[80%] overflow-y-auto rounded-t-2xl bg-white shadow-xl md:inset-y-0 md:left-0 md:right-auto md:max-h-none md:w-80 md:rounded-none md:border-r md:border-stone-200">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-stone-200 bg-white px-4 py-2">
+      <div className="absolute inset-x-0 bottom-0 z-20 max-h-[80%] overflow-y-auto rounded-t-2xl bg-surface shadow-xl md:inset-y-0 md:left-0 md:right-auto md:max-h-none md:w-80 md:rounded-none md:border-r md:border-line">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-surface px-4 py-2">
           <h2 className="font-semibold">Plan settings</h2>
-          <button onClick={onClose} className="rounded px-2 py-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700" aria-label="Close">✕</button>
+          <button onClick={onClose} className="rounded px-2 py-1 text-ghost hover:bg-canvas hover:text-ink-soft" aria-label="Close">✕</button>
         </div>
 
         <Section title="Floor">
@@ -69,7 +69,7 @@ export function PlanSettings({
           <Section title="Scale">
             {bd.calibrated ? (
               <div className="flex items-center justify-between text-sm">
-                <span className="text-stone-600">✓ 1 m ≈ {Math.round(1 / bd.scale)} px</span>
+                <span className="text-muted">✓ 1 m ≈ {Math.round(1 / bd.scale)} px</span>
                 <Button variant="ghost" onClick={() => setTool('calibrate')}>Re-measure</Button>
               </div>
             ) : (
@@ -83,9 +83,9 @@ export function PlanSettings({
           </Section>
         )}
 
-        <Section title="Rooms" right={floor.rooms.length > 0 && <span className="text-xs text-stone-500">{fmtArea(total)}</span>}>
+        <Section title="Rooms" right={floor.rooms.length > 0 && <span className="text-xs text-faint">{fmtArea(total)}</span>}>
           {floor.rooms.length === 0 ? (
-            <p className="text-sm text-stone-500">
+            <p className="text-sm text-faint">
               <b>Draw</b> rooms corner by corner. Corners snap to existing rooms, and new walls snap parallel or perpendicular to existing ones. Or trace the whole outline first, then split it into rooms by drawing across it from wall to wall.
             </p>
           ) : (
@@ -94,11 +94,11 @@ export function PlanSettings({
                 <li key={r.id}>
                   <button
                     onClick={() => onSelect(r.id)}
-                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${r.id === selectedId ? 'bg-blue-100' : 'hover:bg-stone-100'}`}
+                    className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm ${r.id === selectedId ? 'bg-blue-100' : 'hover:bg-canvas'}`}
                   >
                     <span className="h-3 w-3 shrink-0 rounded-sm border border-stone-400" style={{ background: r.color }} />
                     <span className="flex-1 truncate">{r.name}</span>
-                    <span className="text-xs tabular-nums text-stone-500">{fmtArea(area(r.points))}</span>
+                    <span className="text-xs tabular-nums text-faint">{fmtArea(area(r.points))}</span>
                   </button>
                 </li>
               ))}

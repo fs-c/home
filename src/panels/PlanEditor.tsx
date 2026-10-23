@@ -144,7 +144,7 @@ export function PlanEditor({
   }
 
   return (
-    <div className="flex h-dvh flex-col bg-stone-100">
+    <div className="flex h-dvh flex-col bg-canvas">
       <input
         ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden"
         onChange={(e) => {
@@ -155,7 +155,7 @@ export function PlanEditor({
       />
       {/* everything behind the start dialog is inert while it's open */}
       <div className="contents" inert={showStart}>
-      <header className="flex shrink-0 items-center gap-2 border-b border-stone-200 bg-white px-3 py-2 pt-[max(env(safe-area-inset-top),0.5rem)]">
+      <header className="flex shrink-0 items-center gap-2 border-b border-line bg-surface px-3 py-2 pt-[max(env(safe-area-inset-top),0.5rem)]">
         <FloorTabs
           floors={doc.floors}
           current={floor.id}
@@ -245,9 +245,9 @@ export function PlanEditor({
           role="dialog" aria-modal="true" aria-labelledby="start-title" {...dropTarget}
           className="fixed inset-0 z-40 flex items-end justify-center bg-stone-900/50 p-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] backdrop-blur-[2px] sm:items-center"
         >
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5 text-center shadow-2xl">
+          <div className="w-full max-w-sm rounded-2xl bg-surface p-5 text-center shadow-2xl">
             <h2 id="start-title" className="text-lg font-semibold">Trace your floor plan</h2>
-            <p className="mt-1 text-sm text-stone-500">
+            <p className="mt-1 text-sm text-faint">
               Upload a plan (photo, image or PDF) to trace your rooms on. You only need to do this once.
             </p>
             <Button variant="primary" className="mt-4 w-full !py-2.5" onClick={() => fileRef.current?.click()}>
@@ -256,7 +256,7 @@ export function PlanEditor({
             <Button variant="ghost" className="mt-2 w-full" onClick={() => setDrawWithoutPlan(true)}>
               Draw rooms without a plan
             </Button>
-            <Button variant="ghost" className="mt-1 w-full !text-stone-400" onClick={onDone}>
+            <Button variant="ghost" className="mt-1 w-full !text-ghost" onClick={onDone}>
               Not now
             </Button>
           </div>
@@ -275,16 +275,16 @@ function RoomCard({
   onClose: () => void
 }) {
   return (
-    <div className="pointer-events-auto w-full max-w-md rounded-xl border border-stone-300 bg-white p-2 shadow-md">
+    <div className="pointer-events-auto w-full max-w-md rounded-xl border border-line-strong bg-surface p-2 shadow-md">
       <div className="flex items-center gap-2">
         <input
           value={room.name}
           onChange={(e) => onChange((r) => ({ ...r, name: e.target.value }), `name:${room.id}`)}
           className={`${inputClass} min-w-0 flex-1 font-medium`}
         />
-        <span className="shrink-0 text-xs tabular-nums text-stone-500">{fmtArea(area(room.points))}</span>
+        <span className="shrink-0 text-xs tabular-nums text-faint">{fmtArea(area(room.points))}</span>
         <Button variant="danger" onClick={onDelete}>Delete</Button>
-        <button onClick={onClose} className="rounded px-1.5 py-1 text-stone-400 hover:bg-stone-100 hover:text-stone-700" aria-label="Deselect">✕</button>
+        <button onClick={onClose} className="rounded px-1.5 py-1 text-ghost hover:bg-canvas hover:text-ink-soft" aria-label="Deselect">✕</button>
       </div>
       <div className="mt-2 flex flex-wrap gap-2 px-0.5">
         {ROOM_COLORS.map((c) => (
@@ -292,7 +292,7 @@ function RoomCard({
             key={c}
             aria-label={`Colour ${c}`}
             onClick={() => onChange((r) => ({ ...r, color: c }))}
-            className={`h-6 w-6 rounded-full border ${room.color === c ? 'ring-2 ring-blue-500 ring-offset-1' : 'border-stone-300'}`}
+            className={`h-6 w-6 rounded-full border ${room.color === c ? 'ring-2 ring-blue-500 ring-offset-1' : 'border-line-strong'}`}
             style={{ background: c }}
           />
         ))}

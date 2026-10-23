@@ -39,10 +39,10 @@ export function CalibrateDialog({
           e.preventDefault()
           if (parsed) onApply(parsed, straighten && canStraighten)
         }}
-        className="w-full max-w-sm rounded-xl border border-stone-300 bg-white p-4 shadow-lg"
+        className="w-full max-w-sm rounded-xl border border-line-strong bg-surface p-4 shadow-lg"
       >
         <h3 className="font-semibold">How long is this line in reality?</h3>
-        <p className="mt-1 text-xs text-stone-500">
+        <p className="mt-1 text-xs text-faint">
           Use a dimension printed on the plan. The more of the plan the line spans, the more accurate the scale.
           Drag the ends of the line to adjust them. Currently measures {current.toFixed(2)} m.
         </p>
@@ -57,14 +57,14 @@ export function CalibrateDialog({
           className={`${inputClass} mt-3 w-full`}
         />
         {canStraighten && (
-          <label className="mt-3 flex items-start gap-2 text-sm text-stone-700">
+          <label className="mt-3 flex items-start gap-2 text-sm text-ink-soft">
             <input
               type="checkbox" checked={straighten} onChange={(e) => setStraighten(e.target.checked)}
-              className="mt-0.5 accent-blue-600"
+              className="mt-0.5 accent-accent"
             />
             <span>
               Straighten the plan along this line
-              <span className="block text-xs text-stone-500">
+              <span className="block text-xs text-faint">
                 Rotates by {turnDeg > 0 ? '+' : ''}{turnDeg.toFixed(1)}° so this wall is {Math.abs(Math.round(Math.atan2(line[1].y - line[0].y, line[1].x - line[0].x) / (Math.PI / 2))) % 2 ? 'vertical' : 'horizontal'}.
               </span>
             </span>

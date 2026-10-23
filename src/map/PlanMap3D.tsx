@@ -67,14 +67,14 @@ export function PlanMap3D({
       <div ref={hostRef} className="absolute inset-0" />
       <div ref={labelsRef} className="pointer-events-none absolute inset-0 overflow-hidden" />
       {(view.rotated || !view.fitted) && (
-        <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-stone-300 bg-white/90 shadow-sm backdrop-blur">
+        <div className="absolute bottom-3 right-3 flex flex-col overflow-hidden rounded-lg border border-line-strong bg-surface/90 shadow-sm backdrop-blur">
           {view.rotated && (
-            <button title="Reset rotation" onClick={() => engineRef.current?.resetRotation()} className="h-9 w-9 text-lg font-semibold text-red-600 hover:bg-stone-100">
+            <button title="Reset rotation" onClick={() => engineRef.current?.resetRotation()} className="h-9 w-9 text-lg font-semibold text-danger hover:bg-canvas">
               ↑
             </button>
           )}
           {!view.fitted && (
-            <button title="Fit to content" onClick={() => engineRef.current?.fit()} className="h-9 w-9 text-lg text-stone-600 hover:bg-stone-100">
+            <button title="Fit to content" onClick={() => engineRef.current?.fit()} className="h-9 w-9 text-lg text-muted hover:bg-canvas">
               ⤢
             </button>
           )}
