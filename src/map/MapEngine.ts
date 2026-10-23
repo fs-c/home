@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { cssColor } from '../lib/dom'
 import { bounds, labelPoint } from '../lib/geometry'
 import type { Floor, Room, Vec } from '../model/types'
 import { slabGeometry, wallGeometry } from './geometry3d'
@@ -315,7 +316,7 @@ export class MapEngine {
 
     const wg = wallGeometry(rooms, s.wallThickness, s.wallHeight)
     if (wg) {
-      const walls = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ color: s.wallColor, roughness: 0.95 }))
+      const walls = new THREE.Mesh(wg, new THREE.MeshStandardMaterial({ color: cssColor('--color-map-wall'), roughness: 0.95 }))
       walls.castShadow = walls.receiveShadow = shadows
       this.content.add(walls)
     }

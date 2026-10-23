@@ -15,10 +15,7 @@ export interface MapSettings {
   floorThickness: number
   /** Selected room's floor rises by this much. */
   selectedLift: number
-  // colors
-  wallColor: string
-  groundColor: string
-  groundColor2: string
+  // look
   /** How much rooms without open TODOs fade towards white (0–1). */
   idleFade: number
   // light
@@ -50,9 +47,6 @@ export const DEFAULT_MAP_SETTINGS: MapSettings = {
   wallThickness: 0.14,
   floorThickness: 0.12,
   selectedLift: 0.08,
-  wallColor: '#f5f2ee',
-  groundColor: '#f1ede7',
-  groundColor2: '#d9d2c7',
   idleFade: 0.55,
   ambient: 1.4,
   sun: 1.9,
@@ -70,10 +64,9 @@ export const DEFAULT_MAP_SETTINGS: MapSettings = {
 
 type Num = { key: keyof MapSettings; label: string; min: number; max: number; step: number; unit?: string }
 type Bool = { key: keyof MapSettings; label: string }
-type Color = { key: keyof MapSettings; label: string }
 
 /** Drives the settings panel, so a new setting only needs an entry here and in the interface/defaults. */
-export const SETTING_GROUPS: { title: string; numbers?: Num[]; colors?: Color[]; bools?: Bool[] }[] = [
+export const SETTING_GROUPS: { title: string; numbers?: Num[]; bools?: Bool[] }[] = [
   {
     title: 'Camera',
     bools: [{ key: 'fixPitch', label: 'Fixed tilt (ignore scrolling)' }],
@@ -94,12 +87,7 @@ export const SETTING_GROUPS: { title: string; numbers?: Num[]; colors?: Color[];
     ],
   },
   {
-    title: 'Colors',
-    colors: [
-      { key: 'wallColor', label: 'Walls' },
-      { key: 'groundColor', label: 'Background (center)' },
-      { key: 'groundColor2', label: 'Background (edge)' },
-    ],
+    title: 'Look',
     numbers: [{ key: 'idleFade', label: 'Fade rooms without TODOs', min: 0, max: 1, step: 0.05 }],
   },
   {

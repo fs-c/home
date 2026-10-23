@@ -31,16 +31,6 @@ export function MapSettingsPanel({
             {g.bools?.map((b) => (
               <Check key={b.key} label={b.label} checked={settings[b.key] as boolean} onChange={(v) => set(b.key, v as never)} />
             ))}
-            {g.colors?.map((c) => (
-              <label key={c.key} className="flex items-center justify-between text-sm text-stone-600">
-                {c.label}
-                <input
-                  type="color" value={settings[c.key] as string}
-                  onChange={(e) => set(c.key, e.target.value as never)}
-                  className="h-7 w-12 rounded border border-stone-300 bg-white"
-                />
-              </label>
-            ))}
             {g.numbers?.map((n) => (
               <Slider
                 key={n.key} label={n.label} min={n.min} max={n.max} step={n.step}
