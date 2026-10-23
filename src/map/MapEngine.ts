@@ -610,7 +610,7 @@ export class MapEngine {
       this.camera.updateProjectionMatrix()
       this.pitch = pitchRad(model.pitchAt(t))
       this.fit(false)
-      frames.push(this.layoutLabels().map((r) => ({ off: { x: r.pos.x - r.a.x, y: r.pos.y - r.a.y }, floating: r.floating })))
+      frames.push(this.layoutLabels(frames[k - 1]).map((r) => ({ off: { x: r.pos.x - r.a.x, y: r.pos.y - r.a.y }, floating: r.floating })))
     }
     this.size = saved.size
     this.camera.aspect = this.size.w / this.size.h
@@ -627,9 +627,11 @@ export class MapEngine {
   /**
    * Labels that fit inside their room stay there. The others float: they are moved just outside
    * the building (or into any free spot) and tied to their room by a leader line and dot.
-   * Returns where each label goes, for the camera as it is now.
+   * Returns where each label goes, for the camera as it is now. `prev` is the layout of the previous
+   * keyframe: labels that floated there are penalised for moving away from where they were, so they
+   * don't jump around while interpolating.
    */
-  private layoutLabels() {
+  private layoutLabels(prev?: Keyframes['frames'][number]) {
     const { w, h } = this.size
     const MARGIN = 4
     const edge = this.data?.settings.floatLabels ?? false
@@ -670,10 +672,15 @@ export class MapEngine {
       lineRoom: 40, // the leader passes over a foreign room (each)
       lineLine: 120, // the leader crosses another leader (each)
       lineLabel: 300, // the leader runs through another label, or another leader through this label (each)
+      move: 1.5, // per px the label's offset from its anchor differs from the previous keyframe
     }
     const inView = (r: Rect) => r.x0 >= MARGIN && r.y0 >= MARGIN && r.x1 <= w - MARGIN && r.y1 <= h - MARGIN
     type Item = (typeof items)[number]
     const fixedLabels = items.filter((i) => i.fits)
+    const prevOff = (it: Item) => {
+      const f = prev?.[this.labels.indexOf(it.l)]
+      return f?.floating ? f.off : null
+    }
 
     /** Costs that depend only on the label and its own spot. */
     const staticTerms = (it: Item, p: Pt) => {
@@ -683,6 +690,10 @@ export class MapEngine {
         dist: Math.hypot(Math.max(r.x0 - it.a.x, 0, it.a.x - r.x1), Math.max(r.y0 - it.a.y, 0, it.a.y - r.y1)),
         coverRoom: polys.some((poly) => rectHitsPoly(r, poly)) ? W.coverRoom : 0,
         lineRoom: W.lineRoom * items.filter((o) => o !== it && segHitsPoly(it.a, p, o.poly)).length,
+        move: (() => {
+          const off = prevOff(it)
+          return off ? W.move * Math.hypot(p.x - it.a.x - off.x, p.y - it.a.y - off.y) : 0
+        })(),
       }
     }
     /** Costs that depend on where the other labels currently are. */
